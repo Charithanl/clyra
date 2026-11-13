@@ -1,0 +1,5 @@
+import Link from "next/link";
+
+export default function LoginPage() {
+  return <main className="onboarding-page"><div className="onboarding-brand"><span>clyra</span><small>CREATOR INTELLIGENCE</small></div><section className="login-card"><div className="overline">WELCOME BACK</div><h1>Good to see you<br /><em>again.</em></h1><p>Sign in to pick up where you left off.</p><label className="field"><span>Email address</span><input type="email" placeholder="you@company.com" /></label><label className="field"><span>Password</span><input type="password" placeholder="••••••••" /></label><button className="primary-btn login-button">Sign in →</button><div className="login-divider"><span>or</span></div><button className="social-login">Continue with Google</button><p className="signin-note">New to Clyra? <Link href="/account-type">Get started</Link></p></section></main>;
+}

@@ -1,0 +1,1 @@
+.mini-field select{width:100%;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:6px;padding:10px 11px;font-size:10px;outline:0}.mini-field select:focus{border-color:var(--wine);box-shadow:0 0 0 3px rgba(170,25,69,.07)}
