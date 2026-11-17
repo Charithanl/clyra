@@ -1,0 +1,55 @@
+import { type CampaignRow } from "@/components/brand/campaigns/campaignStore";
+import { getDemoBrandCreators as getLegacyCreators } from "./mock-data";
+import { campaignRepository, creatorRepository } from "./repositories";
+import type { Campaign, CampaignInvitation, CampaignParticipation, CreatorProfile } from "@/types/shared";
+import type { CreatorCampaignView } from "@/lib/creator/types";
+import { DEMO_CREATOR_IDENTITY } from "./identity";
+import { auditRepository, applicationRepository, invitationRepository, notificationRepository, participationRepository, reviewRepository, submissionRepository, versionRepository } from "./domain-repositories";
+import { canonicalIdForNewCampaign, toCanonicalCampaignId, toLegacyCampaignId } from "./campaign-id-mapping";
+
+type LegacyCampaign = CampaignRow;
+export function getPublishedCampaigns() { return campaignRepository.getPublished(); }
+export function getPublishedCampaignOpportunities(): CreatorCampaignView[] { return getPublishedCampaigns().map((campaign) => ({ id: campaign.id, title: campaign.title, description: campaign.description, brandId: campaign.clientBrandId ?? campaign.organizationId, brandName: campaign.clientBrandId ?? campaign.organizationName, brandLogo: (campaign.clientBrandId ?? campaign.organizationName).slice(0, 1), coverImage: "https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?auto=format&fit=crop&w=900&q=82", category: (campaign.categories[0] ?? "Lifestyle") as CreatorCampaignView["category"], platforms: campaign.platforms.map((item) => item === "INSTAGRAM" ? "Instagram" : "YouTube"), compensationType: campaign.compensationType === "Paid" ? "Paid" : "Product exchange", compensationMin: campaign.budget.min ?? 0, compensationMax: campaign.budget.max ?? campaign.budget.min ?? 0, deliverables: campaign.deliverables.map((item) => ({ id: item.id, title: item.title, platform: item.platform === "INSTAGRAM" ? "Instagram" : "YouTube", contentType: item.contentType, quantity: 1, description: item.description, deadline: item.dueDate, mandatory: item.status !== "OPTIONAL" })), applicationDeadline: campaign.applicationDeadline, contentDeadline: campaign.endDate, startDate: campaign.startDate, endDate: campaign.endDate, status: "Open", campaignType: "Sponsored post", eligibility: { minFollowers: 0, tier: "Nano", location: "Remote", audience: campaign.targetAudience, platform: campaign.platforms[0] === "YOUTUBE" ? "YouTube" : "Instagram" }, brief: { objective: campaign.objectives[0] ?? campaign.description, hashtags: campaign.hashtags, mentions: campaign.brandMentions, keywords: campaign.keywords, guidelines: campaign.requirements.join(" ") || "Follow the campaign brief shared by the brand.", disclosure: campaign.disclosureRequirements.join(" ") || "Use the applicable paid partnership disclosure.", dos: ["Keep the content authentic"], donts: ["Do not make unverified claims"] }, brandIntroduction: `${campaign.organizationName} creator campaign.`, targetAudience: campaign.targetAudience })) }
+export function getCreatorCampaignById(id: string) { const campaign = campaignRepository.getById(id); return campaign ? getPublishedCampaignOpportunities().find((item) => item.id === id) : undefined; }
+export function getSharedCampaignById(id: string) { return campaignRepository.getById(toCanonicalCampaignId(id) ?? id); }
+export function createCampaign(campaign: Campaign) { return campaignRepository.create(campaign); }
+export function updateCampaign(id: string, changes: Partial<Campaign>) { return campaignRepository.update(toCanonicalCampaignId(id) ?? id, changes); }
+export function publishCampaign(id: string) { return campaignRepository.publish(toCanonicalCampaignId(id) ?? id); }
+export function pauseCampaign(id: string) { return campaignRepository.pause(toCanonicalCampaignId(id) ?? id); }
+export function resumeCampaign(id: string) { return campaignRepository.resume(toCanonicalCampaignId(id) ?? id); }
+export function completeCampaign(id: string) { return campaignRepository.complete(toCanonicalCampaignId(id) ?? id); }
+export function cancelCampaign(id: string) { return campaignRepository.cancel(toCanonicalCampaignId(id) ?? id); }
+export const getApplications = () => applicationRepository.list();
+export const getInvitations = () => invitationRepository.list();
+export const getParticipations = () => participationRepository.list();
+export const getParticipationRecordsForCreator = (creatorId: string) => { reconcileAcceptedInvitationParticipations(); return participationRepository.listByCreator(creatorId); };
+export const getParticipationRecord = (campaignId: string, creatorId: string) => participationRepository.findByCampaignAndCreator(campaignId, creatorId);
+export const createParticipationRecord = (record: CampaignParticipation) => participationRepository.create(record);
+export function createParticipationForAcceptedInvitation(invitation: CampaignInvitation) {
+  if (invitation.status !== "ACCEPTED") throw new Error("Only accepted invitations can create participation.");
+  const existing = participationRepository.findByCampaignAndCreator(invitation.campaignId, invitation.creatorId);
+  if (existing) return existing;
+  const record: CampaignParticipation = { id: `participation-${invitation.id}`, campaignId: invitation.campaignId, creatorId: invitation.creatorId, sourceType: "INVITATION", sourceId: invitation.id, status: "UPCOMING", joinedAt: invitation.respondedAt ?? new Date().toISOString() };
+  return participationRepository.create(record);
+}
+export function reconcileAcceptedInvitationParticipations() { invitationRepository.list().filter((invitation) => invitation.status === "ACCEPTED").forEach((invitation) => createParticipationForAcceptedInvitation(invitation)); }
+export const getSubmissions = () => submissionRepository.list();
+export const getSubmissionVersions = (submissionId: string) => versionRepository.listBySubmission(submissionId);
+export const getContentReviews = () => reviewRepository.list();
+export const getAuditResults = () => auditRepository.list();
+export const getNotifications = (recipientUserId?: string) => recipientUserId ? notificationRepository.listByRecipient(recipientUserId) : notificationRepository.list();
+export const getInvitationRecords = () => invitationRepository.list();
+export const getInvitationRecordsForCreator = (creatorId: string) => invitationRepository.listByCreator(creatorId);
+export const createInvitationRecord = (record: CampaignInvitation) => invitationRepository.create(record);
+export const updateInvitationRecord = (id: string, changes: Partial<CampaignInvitation>) => invitationRepository.update(id, changes);
+export const hasActiveInvitationRecord = (campaignId: string, creatorId: string) => invitationRepository.hasActive(campaignId, creatorId);
+export function getBrandCampaignRows() { return campaignRepository.getAll().filter((campaign) => campaign.organizationId === "org-studio-north").map(toLegacyCampaign); }
+export function getCreatorProfile(id = DEMO_CREATOR_IDENTITY.creatorId) { return creatorRepository.getById(id); }
+export function getCreatorProfiles() { return creatorRepository.list(); }
+export function updateCreatorProfile(profile: CreatorProfile) { return creatorRepository.update(profile); }
+export function getBrandDirectoryCreators() { const profile = creatorRepository.getById(DEMO_CREATOR_IDENTITY.creatorId); return getLegacyCreators().map((creator) => creator.id === DEMO_CREATOR_IDENTITY.directoryId && profile ? { ...creator, name: profile.displayName, bio: profile.bio, location: profile.location, niche: profile.categories[0] ?? creator.niche, followers: profile.socialAccounts[0]?.followerCount ?? creator.followers, engagement: profile.socialAccounts[0]?.engagementRate ?? creator.engagement, platforms: profile.socialAccounts.map((account) => account.platform === "INSTAGRAM" ? "Instagram" : "YouTube") } : creator); }
+function rowToSharedCampaign(row: CampaignRow): Campaign { const id = toCanonicalCampaignId(row.id) ?? canonicalIdForNewCampaign(row.id); const existing = campaignRepository.getById(id); const now = new Date().toISOString(); return { id, organizationId: "org-studio-north", clientBrandId: row.brand, organizationName: "Studio North", title: row.name, description: row.description, objectives: existing?.objectives ?? [row.description], industry: existing?.industry ?? "Creator marketing", categories: existing?.categories ?? ["Lifestyle"], platforms: row.platforms.map((item) => item === "Instagram" ? "INSTAGRAM" : "YOUTUBE"), targetAudience: existing?.targetAudience ?? "Campaign-defined audience", budget: { min: Number(row.budget.replace(/\D/g, "")) || undefined, currency: existing?.budget.currency ?? "INR" }, compensationType: existing?.compensationType ?? "Paid", startDate: existing?.startDate ?? now, endDate: existing?.endDate ?? now, applicationDeadline: existing?.applicationDeadline ?? now, status: row.status === "Active" ? "PUBLISHED" : row.status === "Draft" ? "DRAFT" : row.status === "Paused" ? "PAUSED" : row.status === "Completed" ? "COMPLETED" : "CANCELLED", requirements: existing?.requirements ?? [], hashtags: existing?.hashtags ?? [], brandMentions: existing?.brandMentions ?? [], keywords: existing?.keywords ?? [], disclosureRequirements: existing?.disclosureRequirements ?? [], deliverables: existing?.deliverables ?? [], createdAt: existing?.createdAt ?? now, updatedAt: now, publishedAt: row.status === "Active" ? existing?.publishedAt ?? now : existing?.publishedAt }; }
+export function saveBrandCampaign(campaign: CampaignRow) { return campaignRepository.create(rowToSharedCampaign(campaign)); }
+export function updateBrandCampaign(id: number, changes: Partial<CampaignRow>) { const canonicalId = toCanonicalCampaignId(id); if (!canonicalId) return undefined; const current = campaignRepository.getById(canonicalId); if (!current) return undefined; return saveBrandCampaign({ ...toLegacyCampaign(current), ...changes, id }); }
+export function getBrandCampaigns() { return getBrandCampaignRows(); }
+export function toLegacyCampaign(campaign: Campaign): LegacyCampaign { return { id: toLegacyCampaignId(campaign.id) ?? Date.now(), name: campaign.title, description: campaign.description, brand: campaign.clientBrandId ?? campaign.organizationName, platforms: campaign.platforms.map((item) => item === "INSTAGRAM" ? "Instagram" : "YouTube"), creators: 0, accepted: 0, budget: campaign.budget.min ? `₹${campaign.budget.min}` : "Budget TBD", start: campaign.startDate.slice(0, 10), end: campaign.endDate.slice(0, 10), status: campaign.status === "PUBLISHED" ? "Active" : campaign.status === "DRAFT" ? "Draft" : campaign.status === "PAUSED" ? "Paused" : campaign.status === "COMPLETED" ? "Completed" : "Archived" }; }

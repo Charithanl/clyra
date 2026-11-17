@@ -6,6 +6,13 @@ import { Bell, ChevronDown, CircleHelp, FlaskConical, LayoutDashboard, LineChart
 import { useEffect, useState } from "react";
 import "./brand-workspace.css";
 
+if (typeof document !== "undefined") {
+  document.addEventListener("click", (event) => {
+    const target = (event.target as HTMLElement).closest("button");
+    if (target?.textContent?.trim() === "Log Out") window.location.assign("/account-type");
+  });
+}
+
 const mainNav = [{ label: "Overview", href: "/brand/overview", icon: LayoutDashboard }, { label: "Campaigns", href: "/brand/campaigns", icon: Megaphone }, { label: "Creator Directory", href: "/brand/creators", icon: Users }, { label: "Invitations", href: "/brand/invitations", icon: Mail }, { label: "Content Review", href: "/brand/content-review", icon: ClipboardIcon }, { label: "Analytics", href: "/brand/analytics", icon: LineChart }];
 const toolNav = [{ label: "Simulation Lab", href: "/brand/simulation-lab", icon: FlaskConical }];
 
