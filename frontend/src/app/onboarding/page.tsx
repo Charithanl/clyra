@@ -1,11 +1,14 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ArrowLeft, ArrowRight, Check, CircleHelp, Instagram, Sparkles, Youtube } from "lucide-react";
+import { clearDraft, readDraft, ROLE_ONBOARDING_DRAFT_KEY, writeDraft } from "@/lib/draft-storage";
 import "./onboarding.css";
 
 type Role = "brand" | "creator" | null;
+type RoleDraft = { role: Exclude<Role, null>; step: number; fields?: Record<string, string> };
+function isRoleDraft(value: unknown): value is RoleDraft { if (!value || typeof value !== "object") return false; const draft = value as Partial<RoleDraft>; const fieldsValid = draft.fields === undefined || (Boolean(draft.fields) && typeof draft.fields === "object" && !Array.isArray(draft.fields) && Object.keys(draft.fields).length <= 80 && Object.entries(draft.fields).every(([key, field]) => key.length <= 160 && typeof field === "string" && field.length <= 2000)); return fieldsValid && ((draft.role === "brand" && Number.isInteger(draft.step) && draft.step! >= 0 && draft.step! <= 3) || (draft.role === "creator" && Number.isInteger(draft.step) && draft.step! >= 0 && draft.step! <= 5)); }
 const steps = {
   brand: ["Your organization", "Workspace setup", "Invite your team", "Ready to go"],
   creator: ["Your profile", "Your niche", "Connect accounts", "Your audience", "Portfolio", "Ready to go"],
@@ -20,10 +23,44 @@ function OnboardingFlow() {
   const initialRole = searchParams.get("role");
   const [role, setRole] = useState<Role>(initialRole === "brand" || initialRole === "creator" ? initialRole : null);
   const [step, setStep] = useState(0);
+  const [fields, setFields] = useState<Record<string, string>>({});
+  const [draftReady, setDraftReady] = useState(false);
+  const formRef = useRef<HTMLDivElement>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const activeSteps = role ? steps[role] : [];
   const isLast = role !== null && step === activeSteps.length - 1;
+
+  useEffect(() => {
+    const draft = readDraft(ROLE_ONBOARDING_DRAFT_KEY, isRoleDraft);
+    if (draft && (!initialRole || draft.role === initialRole)) { setRole(draft.role); setStep(draft.step); setFields(draft.fields ?? {}); }
+    setDraftReady(true);
+  }, [initialRole]);
+
+  useEffect(() => {
+    if (!draftReady) return;
+    if (role) writeDraft(ROLE_ONBOARDING_DRAFT_KEY, { role, step, fields });
+    else clearDraft(ROLE_ONBOARDING_DRAFT_KEY);
+  }, [draftReady, fields, role, step]);
+
+  useEffect(() => {
+    const root = formRef.current;
+    if (!root || !role) return;
+    root.querySelectorAll<HTMLInputElement | HTMLSelectElement>(".field input, .field select").forEach((control) => {
+      const label = control.closest(".field")?.querySelector("span")?.textContent?.trim();
+      const value = label ? fields[`${role}-${step}-${label}`] : undefined;
+      if (value !== undefined) control.value = value;
+    });
+    const saveField = (event: Event) => {
+      const control = event.target;
+      if (!(control instanceof HTMLInputElement || control instanceof HTMLSelectElement)) return;
+      const label = control.closest(".field")?.querySelector("span")?.textContent?.trim();
+      if (label) setFields((current) => ({ ...current, [`${role}-${step}-${label}`]: control.value }));
+    };
+    root.addEventListener("input", saveField);
+    root.addEventListener("change", saveField);
+    return () => { root.removeEventListener("input", saveField); root.removeEventListener("change", saveField); };
+  }, [fields, role, step]);
 
   async function completeOnboarding() {
     if (!role) return;
@@ -36,6 +73,7 @@ function OnboardingFlow() {
         body: JSON.stringify({ account_type: role, profile_data: { completed_steps: activeSteps.length } }),
       });
       if (!response.ok) throw new Error("Could not save your onboarding details.");
+      clearDraft(ROLE_ONBOARDING_DRAFT_KEY);
       window.location.assign("/");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not save your onboarding details.");
@@ -44,9 +82,9 @@ function OnboardingFlow() {
     }
   }
 
-  if (!role) return <main className="onboarding-page"><Brand /><button className="help-button"><CircleHelp size={15} /> Need help?</button><section className="role-selection"><div className="onboarding-intro"><div className="overline">WELCOME TO CLYRA</div><h1>Let&apos;s make something<br /><em>meaningful.</em></h1><p>First, tell us a little about how you&apos;ll be using Clyra.</p></div><div className="role-grid"><RoleCard role="brand" onClick={() => setRole("brand")} /><RoleCard role="creator" onClick={() => setRole("creator")} /></div><p className="signin-note">Already have an account? <a href="#">Sign in</a></p></section></main>;
+  if (!role) return <main className="onboarding-page"><Brand /><button className="help-button"><CircleHelp size={15} /> Need help?</button><section className="role-selection"><div className="onboarding-intro"><div className="overline">WELCOME TO CLYRA</div><h1>Let&apos;s make something<br /><em>meaningful.</em></h1><p>First, tell us a little about how you&apos;ll be using Clyra.</p><p className="onboarding-demo-note">Demo onboarding - no account is created.</p></div><div className="role-grid"><RoleCard role="brand" onClick={() => setRole("brand")} /><RoleCard role="creator" onClick={() => setRole("creator")} /></div><p className="signin-note">Already have an account? <a href="/login">Sign in</a></p></section></main>;
 
-  return <main className="onboarding-page"><Brand /><button className="help-button"><CircleHelp size={15} /> Need help?</button><section className="setup-layout"><div className="setup-aside"><button className="back-link" onClick={() => setRole(null)}><ArrowLeft size={14} /> Change account type</button><div><div className="overline">{role === "brand" ? "BRAND / AGENCY SETUP" : "CREATOR SETUP"}</div><h1>{role === "brand" ? <>Build your<br /><em>workspace.</em></> : <>Put your<br /><em>best self</em><br />forward.</>}</h1><p>{role === "brand" ? "A thoughtful home for every creator partnership." : "A profile that opens the right doors."}</p></div><div className="setup-tip"><Sparkles size={15} /><span><b>A little note</b><small>You can always update these details later from Settings.</small></span></div></div><div className="setup-main"><div className="progress-rail">{activeSteps.map((label, index) => <div className={index <= step ? "progress-step active" : "progress-step"} key={label}><span>{index < step ? <Check size={12} /> : index + 1}</span><small>{label}</small></div>)}</div><div className="setup-form">{role === "brand" ? <BrandForm step={step} /> : <CreatorForm step={step} />}{error ? <p className="form-error">{error}</p> : null}</div><div className="form-actions"><button className="secondary-btn" onClick={() => step > 0 ? setStep(step - 1) : setRole(null)}>{step > 0 ? "Back" : "Cancel"}</button><button className="primary-btn" disabled={saving} onClick={() => isLast ? completeOnboarding() : setStep(step + 1)}>{saving ? "Saving…" : isLast ? "Enter workspace" : "Continue"}<ArrowRight size={15} /></button></div></div></section></main>;
+  return <main className="onboarding-page"><Brand /><button className="help-button"><CircleHelp size={15} /> Need help?</button><section className="setup-layout"><div className="setup-aside"><button className="back-link" onClick={() => setRole(null)}><ArrowLeft size={14} /> Change account type</button><div><div className="overline">{role === "brand" ? "BRAND / AGENCY SETUP" : "CREATOR SETUP"}</div><h1>{role === "brand" ? <>Build your<br /><em>workspace.</em></> : <>Put your<br /><em>best self</em><br />forward.</>}</h1><p>{role === "brand" ? "A thoughtful home for every creator partnership." : "A profile that opens the right doors."}</p><p className="onboarding-demo-note">Demo setup only - no authenticated account is created.</p></div><div className="setup-tip"><Sparkles size={15} /><span><b>A little note</b><small>You can always update these details later from Settings.</small></span></div></div><div className="setup-main"><div className="progress-rail">{activeSteps.map((label, index) => <div className={index <= step ? "progress-step active" : "progress-step"} key={label}><span>{index < step ? <Check size={12} /> : index + 1}</span><small>{label}</small></div>)}</div><div className="setup-form" ref={formRef}>{role === "brand" ? <BrandForm step={step} /> : <CreatorForm step={step} />}{error ? <p className="form-error">{error}</p> : null}</div><div className="form-actions"><button className="secondary-btn" onClick={() => step > 0 ? setStep(step - 1) : setRole(null)}>{step > 0 ? "Back" : "Cancel"}</button><button className="primary-btn" disabled={saving} onClick={() => isLast ? completeOnboarding() : setStep(step + 1)}>{saving ? "Saving…" : isLast ? "Enter workspace" : "Continue"}<ArrowRight size={15} /></button></div></div></section></main>;
 }
 
 function Brand() { return <div className="onboarding-brand"><span>clyra</span><small>CREATOR INTELLIGENCE</small></div>; }

@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight, BarChart3, Check, Search, UserRound } from "lucide-react";
+import { readSignupDraft, writeSignupDraft } from "@/lib/draft-storage";
 
 type AccountType = "brand" | "creator";
 const options: Array<{ type: AccountType; eyebrow: string; title: string; description: string }> = [
@@ -13,7 +14,15 @@ const options: Array<{ type: AccountType; eyebrow: string; title: string; descri
 export default function AccountTypeSelector() {
   const router = useRouter();
   const [selected, setSelected] = useState<AccountType | null>(null);
-  return <div className="account-type-selector"><div className="account-type-cards">{options.map((option) => { const isSelected = selected === option.type; const isBrand = option.type === "brand"; return <button key={option.type} type="button" className={`account-type-card ${isBrand ? "account-brand" : "account-creator"} ${isSelected ? "selected" : ""}`} aria-pressed={isSelected} onClick={() => setSelected(option.type)}><span className="account-card-visual">{isBrand ? <BrandVisual /> : <CreatorVisual />}</span><span className="account-card-content"><span className="account-card-eyebrow">{option.eyebrow}</span><strong>{option.title}</strong><span className="account-card-description">{option.description}</span></span><span className="account-selection-indicator">{isSelected ? <Check size={15} /> : null}</span></button>; })}</div><button type="button" className="account-continue" disabled={!selected} onClick={() => selected && router.push(`/signup?type=${selected}`)}>Continue <ArrowRight size={16} /></button><p className="account-helper">You can manage your profile and account settings later.</p></div>;
+  useEffect(() => {
+    const draft = readSignupDraft();
+    if (draft?.flow === "account-type") setSelected(draft.type);
+  }, []);
+  function choose(type: AccountType) {
+    setSelected(type);
+    writeSignupDraft({ flow: "account-type", type, name: "", email: "", termsAccepted: false, step: 0 });
+  }
+  return <div className="account-type-selector"><div className="account-type-cards">{options.map((option) => { const isSelected = selected === option.type; const isBrand = option.type === "brand"; return <button key={option.type} type="button" className={`account-type-card ${isBrand ? "account-brand" : "account-creator"} ${isSelected ? "selected" : ""}`} aria-pressed={isSelected} onClick={() => choose(option.type)}><span className="account-card-visual">{isBrand ? <BrandVisual /> : <CreatorVisual />}</span><span className="account-card-content"><span className="account-card-eyebrow">{option.eyebrow}</span><strong>{option.title}</strong><span className="account-card-description">{option.description}</span></span><span className="account-selection-indicator">{isSelected ? <Check size={15} /> : null}</span></button>; })}</div><button type="button" className="account-continue" disabled={!selected} onClick={() => selected && router.push(`/signup?type=${selected}`)}>Continue <ArrowRight size={16} /></button><p className="account-helper">You can manage your profile and account settings later.</p></div>;
 }
 
 function BrandVisual() { return <span className="brand-visual-inner"><span className="visual-window"><small>CAMPAIGN PULSE</small><b>12</b><i /><i /><i /></span><span className="visual-node node-one"><UserRound size={14} /></span><span className="visual-node node-two"><Search size={14} /></span><span className="visual-node node-three"><BarChart3 size={14} /></span></span>; }

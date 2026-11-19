@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import Landing from "@/components/LandingPage";
 import {
@@ -89,6 +90,7 @@ export default function Home() {
       </aside>
 
       <main className="main-content">
+        <div className="demo-mode-banner" role="status"><span><b>DEMO EXPERIENCE</b> Sample workspace data · no account was created</span><Link href="/">Back to public site</Link></div>
         <header className="topbar">
           <div className="breadcrumbs"><span>Studio North</span><ChevronRight size={13} /><b>{active}</b></div>
           <div className="top-actions"><label className="search-box"><Search size={14} /><input placeholder="Search anything..." /></label><button aria-label="Toggle appearance" className="top-icon" onClick={() => setDark(!dark)}>{dark ? <Sun size={17} /> : <Moon size={17} />}</button><button className="top-icon" onClick={() => notify("You are all caught up.")}><Bell size={17} /><i /></button><button className="top-profile" onClick={() => notify("Profile menu opened")}>AM <ChevronDown size={12} /></button></div>
