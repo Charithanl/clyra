@@ -1,29 +1,70 @@
-export type AuditStatus = "Passed" | "Failed" | "Warning" | "Not Checked";
-export type ReviewStatus = "Pending Review" | "Auditing" | "Audit Completed" | "Revision Requested" | "Approved" | "Rejected";
-export type SubmissionEvent = { event: string; actor: string; timestamp: string; details: string };
-export type CampaignRequirements = { hashtags: string[]; mentions: string[]; keywords: string[]; disclosure: string[]; minCaptionLength: number; maxCaptionLength: number; contentGuidelines: string; deliverables: string; deadline: string };
-export type AuditCheck = { requirement: string; status: AuditStatus; explanation: string; matched?: string };
+import { createContentReview, createAuditResult, getAuditResultsForVersion, getContentReviewsForSubmission, getParticipationRecord, getSubmissionRecord, getSubmissionRecordsForCreator, getSubmissionVersions, getSubmissions as getCanonicalSubmissions, updateSubmissionRecord } from "@/lib/shared/services";
+import { toCanonicalCampaignId, toLegacyCampaignId } from "@/lib/shared/campaign-id-mapping";
+import { DEMO_CREATOR_IDENTITY } from "@/lib/shared/identity";
+import { getDemoCreatorProfile } from "@/lib/shared/mock-data";
+import { runContentAudit, getRequirements as requirementsForCampaign, type AuditCheck, type AuditStatus, type CampaignRequirements, type ReviewStatus, type SubmissionEvent } from "@/lib/services/audit-service";
+import type { AuditResult as CanonicalAudit, ContentReview as CanonicalReview, ContentSubmission, SubmissionVersion } from "@/types/shared";
+
+export type { AuditCheck, AuditStatus, CampaignRequirements, ReviewStatus, SubmissionEvent };
 export type Submission = { id: string; campaignId: number; creatorId: string; deliverableId: string; platform: string; format: string; contentUrl: string; caption: string; notes: string; submittedAt: string; auditStatus: AuditStatus; complianceScore: number; reviewStatus: ReviewStatus; currentVersion: number; versions: number[]; auditResults: AuditCheck[]; reviewHistory: SubmissionEvent[]; reviewer?: string; reviewerNote?: string };
 
-const requirements: Record<number, CampaignRequirements> = {
-  1: { hashtags: ["#AureliaSummer", "#AureliaStyle"], mentions: ["@aureliafashion"], keywords: ["summer", "linen"], disclosure: ["#ad", "#sponsored"], minCaptionLength: 80, maxCaptionLength: 500, contentGuidelines: "Warm, natural styling with a clear view of the collection.", deliverables: "1 Instagram Reel + 3 story frames", deadline: "Jun 25, 2026" },
-  2: { hashtags: ["#EverydayBeauty"], mentions: ["@glowcosmetics"], keywords: ["hydration", "routine"], disclosure: ["#ad", "paid partnership"], minCaptionLength: 60, maxCaptionLength: 400, contentGuidelines: "Show the product in an honest everyday routine.", deliverables: "1 Reel + 1 YouTube Short", deadline: "Jul 08, 2026" },
-  3: { hashtags: ["#TechMadeSimple"], mentions: ["@nexoratech"], keywords: ["simple", "smart"], disclosure: ["#ad"], minCaptionLength: 50, maxCaptionLength: 600, contentGuidelines: "Make the product benefit understandable to a first-time buyer.", deliverables: "1 YouTube video", deadline: "Aug 01, 2026" },
-  4: { hashtags: ["#EarthAndCo"], mentions: ["@earthandco"], keywords: ["sustainable", "refill"], disclosure: ["#ad"], minCaptionLength: 70, maxCaptionLength: 450, contentGuidelines: "Keep the message practical and avoid unsupported environmental claims.", deliverables: "1 Instagram Carousel", deadline: "May 20, 2026" },
-  5: { hashtags: ["#SofterRitual"], mentions: ["@hearthhome"], keywords: ["ritual", "slow living"], disclosure: ["#ad"], minCaptionLength: 60, maxCaptionLength: 500, contentGuidelines: "Quiet, considered storytelling with an authentic home setting.", deliverables: "1 Instagram Reel", deadline: "Jun 14, 2026" },
-};
+const pendingDecision = new Map<string, { decision: CanonicalReview["decision"]; reviewerId: string; feedback: string }>();
+const toCanonicalCreatorId = (id: string) => id === DEMO_CREATOR_IDENTITY.directoryId ? DEMO_CREATOR_IDENTITY.creatorId : id;
+const toBrandCreatorId = (id: string) => id === DEMO_CREATOR_IDENTITY.creatorId ? DEMO_CREATOR_IDENTITY.directoryId : id;
+const statusToReview = (submission: ContentSubmission, review?: CanonicalReview): ReviewStatus => review ? review.decision === "APPROVED" ? "Approved" : review.decision === "REJECTED" ? "Rejected" : "Revision Requested" : submission.status === "DRAFT" ? "Pending Review" : submission.status === "SUBMITTED" ? "Audit Completed" : submission.status === "APPROVED" ? "Approved" : submission.status === "REJECTED" ? "Rejected" : submission.status === "REVISION_REQUIRED" ? "Revision Requested" : "Pending Review";
+const canonicalAuditStatus = (audit?: CanonicalAudit): AuditStatus => !audit ? "Not Checked" : audit.status === "FAILED" || audit.failedChecks.length ? "Failed" : audit.status === "WARNING" || audit.warnings.length ? "Warning" : audit.status === "NOT_CHECKED" ? "Not Checked" : "Passed";
+const auditChecks = (audit?: CanonicalAudit): AuditCheck[] => audit?.findingDetails?.map((item) => ({ requirement: item.requirement, status: item.status === "PASSED" ? "Passed" : item.status === "FAILED" ? "Failed" : item.status === "WARNING" ? "Warning" : "Not Checked", explanation: item.explanation })) ?? [];
+const reviewDecisionLabel = (decision: CanonicalReview["decision"]) => decision === "APPROVED" ? "Content approved" : decision === "REJECTED" ? "Content rejected" : "Revision requested";
+const currentVersionId = (submission: ContentSubmission) => getSubmissionVersions(submission.id).find((version) => version.versionNumber === submission.currentVersion)?.id;
 
-const now = "2026-06-14";
-let submissions: Submission[] = [
-  { id: "SUB-1048", campaignId: 1, creatorId: "maya-brooks", deliverableId: "del-1", platform: "Instagram", format: "Reel", contentUrl: "https://instagram.com/p/clyra-summer-1048", caption: "A slower summer starts with linen, light and the pieces I keep reaching for. #AureliaSummer #AureliaStyle @aureliafashion #ad", notes: "I kept the styling relaxed and used natural light as requested.", submittedAt: now, auditStatus: "Passed", complianceScore: 100, reviewStatus: "Pending Review", currentVersion: 1, versions: [1], auditResults: [], reviewHistory: [{ event: "Content submitted", actor: "Maya Brooks", timestamp: now, details: "Version 1 submitted for review." }, { event: "Automated audit completed", actor: "Clyra audit service", timestamp: now, details: "All configured checks passed." }] },
-  { id: "SUB-1047", campaignId: 2, creatorId: "ella-chen", deliverableId: "del-2", platform: "YouTube", format: "Short", contentUrl: "https://youtube.com/watch?v=clyra-1047", caption: "My everyday hydration routine for busy mornings. #EverydayBeauty @glowcosmetics #ad", notes: "Product close-up begins at 00:12.", submittedAt: "2026-06-12", auditStatus: "Warning", complianceScore: 86, reviewStatus: "Audit Completed", currentVersion: 1, versions: [1], auditResults: [], reviewHistory: [{ event: "Content submitted", actor: "Ella Chen", timestamp: "2026-06-12", details: "Version 1 submitted for review." }, { event: "Automated audit completed", actor: "Clyra audit service", timestamp: "2026-06-12", details: "One caption length warning found." }] },
-  { id: "SUB-1046", campaignId: 5, creatorId: "noah-williams", deliverableId: "del-3", platform: "Instagram", format: "Carousel", contentUrl: "https://instagram.com/p/clyra-1046", caption: "A small ritual for slower evenings. #SofterRitual @hearthhome", notes: "Please review the final frame for product visibility.", submittedAt: "2026-06-10", auditStatus: "Warning", complianceScore: 86, reviewStatus: "Revision Requested", currentVersion: 2, versions: [1, 2], auditResults: [], reviewHistory: [{ event: "Content submitted", actor: "Noah Williams", timestamp: "2026-06-08", details: "Version 1 submitted." }, { event: "Revision requested", actor: "Alex Morgan", timestamp: "2026-06-09", details: "Please add the required disclosure." }, { event: "Creator resubmitted content", actor: "Noah Williams", timestamp: "2026-06-10", details: "Version 2 submitted for a new audit." }] },
-  { id: "SUB-1045", campaignId: 4, creatorId: "jules-martin", deliverableId: "del-4", platform: "Instagram", format: "Post", contentUrl: "https://instagram.com/p/clyra-1045", caption: "A more considered home starts with a refill. #EarthAndCo @earthandco #ad #sustainable", notes: "The caption includes the sustainability claim context.", submittedAt: "2026-06-08", auditStatus: "Passed", complianceScore: 100, reviewStatus: "Approved", currentVersion: 1, versions: [1], auditResults: [], reviewHistory: [{ event: "Content submitted", actor: "Jules Martin", timestamp: "2026-06-08", details: "Version 1 submitted." }, { event: "Automated audit completed", actor: "Clyra audit service", timestamp: "2026-06-08", details: "All configured checks passed." }, { event: "Content approved", actor: "Alex Morgan", timestamp: "2026-06-09", details: "Approved for publishing." }], reviewer: "Alex Morgan" },
-  { id: "SUB-1044", campaignId: 3, creatorId: "arjun-mehta", deliverableId: "del-5", platform: "YouTube", format: "Video", contentUrl: "https://youtube.com/watch?v=clyra-1044", caption: "A smart setup for a simpler desk.", notes: "The product comparison starts at 02:10.", submittedAt: "2026-06-05", auditStatus: "Failed", complianceScore: 43, reviewStatus: "Rejected", currentVersion: 1, versions: [1], auditResults: [], reviewHistory: [{ event: "Content submitted", actor: "Arjun Mehta", timestamp: "2026-06-05", details: "Version 1 submitted." }, { event: "Automated audit completed", actor: "Clyra audit service", timestamp: "2026-06-05", details: "Required disclosure and mention were not found." }, { event: "Content rejected", actor: "Alex Morgan", timestamp: "2026-06-06", details: "The submission did not meet mandatory campaign requirements." }], reviewer: "Alex Morgan" },
-];
+function project(submission: ContentSubmission): Submission {
+  const version = getSubmissionVersions(submission.id).find((item) => item.versionNumber === submission.currentVersion);
+  const audit = version ? getAuditResultsForVersion(version.id)[0] : undefined;
+  const reviews = getContentReviewsForSubmission(submission.id).sort((a, b) => a.reviewedAt.localeCompare(b.reviewedAt));
+  const currentReview = version ? [...reviews].reverse().find((review) => review.versionId === version.id) : undefined;
+  const history: SubmissionEvent[] = [];
+  for (const item of getSubmissionVersions(submission.id)) history.push({ event: item.versionNumber === 1 ? "Content submitted" : "Creator resubmitted content", actor: item.createdBy, timestamp: item.submittedAt, details: `Version ${item.versionNumber} submitted for review.` });
+  for (const review of reviews) history.push({ event: reviewDecisionLabel(review.decision), actor: review.reviewerId, timestamp: review.reviewedAt, details: review.feedback });
+  if (audit) history.push({ event: "Automated audit completed", actor: "Clyra audit service", timestamp: audit.auditedAt, details: `${canonicalAuditStatus(audit)} · ${audit.complianceScore}/100.` });
+  history.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  return { id: submission.id, campaignId: toLegacyCampaignId(submission.campaignId) ?? 0, creatorId: toBrandCreatorId(submission.creatorId), deliverableId: submission.deliverableId, platform: submission.platform === "INSTAGRAM" ? "Instagram" : "YouTube", format: version?.contentType ?? "Content", contentUrl: version?.contentUrl ?? submission.contentUrl, caption: version?.caption ?? submission.caption, notes: version?.supportingNotes ?? "", submittedAt: submission.submittedAt ?? submission.createdAt ?? "", auditStatus: canonicalAuditStatus(audit), complianceScore: audit?.complianceScore ?? 0, reviewStatus: statusToReview(submission, currentReview), currentVersion: submission.currentVersion, versions: getSubmissionVersions(submission.id).map((item) => item.versionNumber), auditResults: auditChecks(audit), reviewHistory: history, reviewer: currentReview?.reviewerId, reviewerNote: currentReview?.feedback };
+}
 
-export function getRequirements(campaignId: number) { return requirements[campaignId] ?? requirements[1]; }
-export function getSubmissions() { return submissions.map((item) => ({ ...item, versions: [...item.versions], reviewHistory: [...item.reviewHistory], auditResults: [...item.auditResults] })); }
-export function getSubmission(id: string) { return getSubmissions().find((item) => item.id === id); }
-export function updateSubmission(id: string, changes: Partial<Submission>) { submissions = submissions.map((item) => item.id === id ? { ...item, ...changes, updatedAt: new Date().toISOString() } as Submission : item); return getSubmission(id); }
-export function addHistory(id: string, event: SubmissionEvent) { const item = submissions.find((entry) => entry.id === id); if (item) item.reviewHistory = [...item.reviewHistory, event]; return getSubmission(id); }
+export function getRequirements(campaignId: number): CampaignRequirements { return requirementsForCampaign(campaignId); }
+function ensureCurrentAudit(submission: ContentSubmission | undefined) { if (!submission) return; const version = getSubmissionVersions(submission.id).find((item) => item.versionNumber === submission.currentVersion); if (version) persistAudit(submission, version); }
+export function getSubmissions(): Submission[] { const records = getCanonicalSubmissions(); records.forEach(ensureCurrentAudit); return records.map(project).sort((a, b) => b.submittedAt.localeCompare(a.submittedAt)); }
+export function getSubmission(id: string): Submission | undefined { const record = getSubmissionRecord(id); ensureCurrentAudit(record); return record ? project(record) : undefined; }
+
+function persistAudit(submission: ContentSubmission, version: SubmissionVersion) {
+  const existing = getAuditResultsForVersion(version.id)[0];
+  if (existing) return existing;
+  const legacyId = toLegacyCampaignId(submission.campaignId) ?? 1;
+  const result = runContentAudit({ caption: version.caption, contentUrl: version.contentUrl, submittedAt: version.submittedAt }, getRequirements(legacyId));
+  return createAuditResult({ id: `audit-${submission.id}-v${version.versionNumber}`, submissionId: submission.id, versionId: version.id, complianceScore: result.score, findings: result.checks.map((check) => check.explanation), passedChecks: result.checks.filter((check) => check.status === "Passed").map((check) => check.requirement), failedChecks: result.checks.filter((check) => check.status === "Failed").map((check) => check.requirement), warnings: result.checks.filter((check) => check.status === "Warning").map((check) => check.requirement), auditedAt: new Date().toISOString(), status: result.status === "Passed" ? "PASSED" : result.status === "Failed" ? "FAILED" : "WARNING", findingDetails: result.checks.map((check) => ({ requirement: check.requirement, status: check.status === "Passed" ? "PASSED" : check.status === "Failed" ? "FAILED" : check.status === "Warning" ? "WARNING" : "NOT_CHECKED", explanation: check.explanation })), suggestions: result.suggestions });
+}
+export function getAuditReport(id: string) { const submission = getSubmissionRecord(id); if (!submission) return undefined; const version = getSubmissionVersions(id).find((item) => item.versionNumber === submission.currentVersion); if (!version) return undefined; const audit = persistAudit(submission, version); return { score: audit.complianceScore, status: canonicalAuditStatus(audit) as Exclude<AuditStatus, "Not Checked">, checks: auditChecks(audit), passed: audit.passedChecks.length, failed: audit.failedChecks.length, warnings: audit.warnings.length, suggestions: audit.suggestions ?? [] }; }
+
+export function updateSubmission(id: string, changes: Partial<Submission>) {
+  const current = getSubmissionRecord(id); if (!current) return undefined;
+  const status = changes.reviewStatus === "Approved" ? "APPROVED" : changes.reviewStatus === "Rejected" ? "REJECTED" : changes.reviewStatus === "Revision Requested" ? "REVISION_REQUIRED" : undefined;
+  if (status) {
+    updateSubmissionRecord(id, { status, updatedAt: new Date().toISOString() });
+    const decision = status === "APPROVED" ? "APPROVED" : status === "REJECTED" ? "REJECTED" : "REVISION_REQUESTED";
+    pendingDecision.set(id, { decision, reviewerId: changes.reviewer ?? "Alex Morgan", feedback: changes.reviewerNote ?? "" });
+    const versionId = currentVersionId({ ...current, currentVersion: current.currentVersion });
+    if (versionId) { const reviewId = `review-${id}-v${current.currentVersion}-${decision.toLowerCase()}-${Date.now()}`; const pending = pendingDecision.get(id)!; createContentReview({ id: reviewId, submissionId: id, versionId, reviewerId: pending.reviewerId, decision, feedback: pending.feedback, reviewedAt: new Date().toISOString() }); pendingDecision.set(id, { ...pending, reviewId } as typeof pending); }
+  }
+  return getSubmission(id);
+}
+export function addHistory(id: string, event: SubmissionEvent) {
+  const submission = getSubmissionRecord(id); const versionId = submission && currentVersionId(submission); const decision = pendingDecision.get(id);
+  if (!submission || !versionId || !decision) return getSubmission(id);
+  const reviewId = (decision as typeof decision & { reviewId?: string }).reviewId ?? `review-${id}-v${submission.currentVersion}-${decision.decision.toLowerCase()}-${Date.now()}`;
+  try { createContentReview({ id: reviewId, submissionId: id, versionId, reviewerId: decision.reviewerId || event.actor, decision: decision.decision, feedback: event.details || decision.feedback, reviewedAt: event.timestamp }); } catch (error) { if (!(error instanceof Error) || !error.message.includes("already exists")) throw error; }
+  pendingDecision.delete(id);
+  return getSubmission(id);
+}
+
+export function listCreatorSubmissions(creatorId: string) { const id = toCanonicalCreatorId(creatorId); return getSubmissions().filter((item) => toCanonicalCreatorId(item.creatorId) === id); }
+export function campaignIdForLegacySubmission(value: number) { return toCanonicalCampaignId(value); }
+export function creatorIdentityForSubmission() { return getDemoCreatorProfile(); }

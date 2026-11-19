@@ -1,7 +1,7 @@
 import { type CampaignRow } from "@/components/brand/campaigns/campaignStore";
 import { getDemoBrandCreators as getLegacyCreators } from "./mock-data";
 import { campaignRepository, creatorRepository } from "./repositories";
-import type { Campaign, CampaignInvitation, CampaignParticipation, CreatorProfile } from "@/types/shared";
+import type { AuditResult, Campaign, CampaignInvitation, CampaignParticipation, ContentReview, ContentSubmission, CreatorProfile, SocialAccount, SubmissionVersion } from "@/types/shared";
 import type { CreatorCampaignView } from "@/lib/creator/types";
 import { DEMO_CREATOR_IDENTITY } from "./identity";
 import { auditRepository, applicationRepository, invitationRepository, notificationRepository, participationRepository, reviewRepository, submissionRepository, versionRepository } from "./domain-repositories";
@@ -34,9 +34,20 @@ export function createParticipationForAcceptedInvitation(invitation: CampaignInv
 }
 export function reconcileAcceptedInvitationParticipations() { invitationRepository.list().filter((invitation) => invitation.status === "ACCEPTED").forEach((invitation) => createParticipationForAcceptedInvitation(invitation)); }
 export const getSubmissions = () => submissionRepository.list();
+export const getSubmissionRecord = (id: string) => submissionRepository.getById(id);
+export const getSubmissionRecordsForCreator = (creatorId: string) => submissionRepository.list().filter((item) => item.creatorId === creatorId);
 export const getSubmissionVersions = (submissionId: string) => versionRepository.listBySubmission(submissionId);
+export const getSubmissionVersion = (id: string) => versionRepository.getById(id);
+export const createSubmissionRecord = (record: ContentSubmission) => submissionRepository.create(record);
+export const updateSubmissionRecord = (id: string, changes: Partial<ContentSubmission>) => submissionRepository.update(id, changes);
+export const createSubmissionVersion = (record: SubmissionVersion) => versionRepository.create(record);
 export const getContentReviews = () => reviewRepository.list();
+export const getContentReviewsForSubmission = (submissionId: string) => reviewRepository.listBySubmission(submissionId);
+export const createContentReview = (record: ContentReview) => reviewRepository.create(record);
 export const getAuditResults = () => auditRepository.list();
+export const getAuditResultsForSubmission = (submissionId: string) => auditRepository.listBySubmission(submissionId);
+export const getAuditResultsForVersion = (versionId: string) => auditRepository.listByVersion(versionId);
+export const createAuditResult = (record: AuditResult) => auditRepository.create(record);
 export const getNotifications = (recipientUserId?: string) => recipientUserId ? notificationRepository.listByRecipient(recipientUserId) : notificationRepository.list();
 export const getInvitationRecords = () => invitationRepository.list();
 export const getInvitationRecordsForCreator = (creatorId: string) => invitationRepository.listByCreator(creatorId);
@@ -47,6 +58,10 @@ export function getBrandCampaignRows() { return campaignRepository.getAll().filt
 export function getCreatorProfile(id = DEMO_CREATOR_IDENTITY.creatorId) { return creatorRepository.getById(id); }
 export function getCreatorProfiles() { return creatorRepository.list(); }
 export function updateCreatorProfile(profile: CreatorProfile) { return creatorRepository.update(profile); }
+export function getCreatorSocialAccounts(creatorId = DEMO_CREATOR_IDENTITY.creatorId) { return creatorRepository.getSocialAccounts(creatorId); }
+export function addCreatorSocialAccount(account: SocialAccount, creatorId = DEMO_CREATOR_IDENTITY.creatorId) { return creatorRepository.addSocialAccount(creatorId, account); }
+export function updateCreatorSocialAccount(accountId: string, changes: Partial<Omit<SocialAccount, "id" | "creatorId">>, creatorId = DEMO_CREATOR_IDENTITY.creatorId) { return creatorRepository.updateSocialAccount(creatorId, accountId, changes); }
+export function removeCreatorSocialAccount(accountId: string, creatorId = DEMO_CREATOR_IDENTITY.creatorId) { return creatorRepository.removeSocialAccount(creatorId, accountId); }
 export function getBrandDirectoryCreators() { const profile = creatorRepository.getById(DEMO_CREATOR_IDENTITY.creatorId); return getLegacyCreators().map((creator) => creator.id === DEMO_CREATOR_IDENTITY.directoryId && profile ? { ...creator, name: profile.displayName, bio: profile.bio, location: profile.location, niche: profile.categories[0] ?? creator.niche, followers: profile.socialAccounts[0]?.followerCount ?? creator.followers, engagement: profile.socialAccounts[0]?.engagementRate ?? creator.engagement, platforms: profile.socialAccounts.map((account) => account.platform === "INSTAGRAM" ? "Instagram" : "YouTube") } : creator); }
 function rowToSharedCampaign(row: CampaignRow): Campaign { const id = toCanonicalCampaignId(row.id) ?? canonicalIdForNewCampaign(row.id); const existing = campaignRepository.getById(id); const now = new Date().toISOString(); return { id, organizationId: "org-studio-north", clientBrandId: row.brand, organizationName: "Studio North", title: row.name, description: row.description, objectives: existing?.objectives ?? [row.description], industry: existing?.industry ?? "Creator marketing", categories: existing?.categories ?? ["Lifestyle"], platforms: row.platforms.map((item) => item === "Instagram" ? "INSTAGRAM" : "YOUTUBE"), targetAudience: existing?.targetAudience ?? "Campaign-defined audience", budget: { min: Number(row.budget.replace(/\D/g, "")) || undefined, currency: existing?.budget.currency ?? "INR" }, compensationType: existing?.compensationType ?? "Paid", startDate: existing?.startDate ?? now, endDate: existing?.endDate ?? now, applicationDeadline: existing?.applicationDeadline ?? now, status: row.status === "Active" ? "PUBLISHED" : row.status === "Draft" ? "DRAFT" : row.status === "Paused" ? "PAUSED" : row.status === "Completed" ? "COMPLETED" : "CANCELLED", requirements: existing?.requirements ?? [], hashtags: existing?.hashtags ?? [], brandMentions: existing?.brandMentions ?? [], keywords: existing?.keywords ?? [], disclosureRequirements: existing?.disclosureRequirements ?? [], deliverables: existing?.deliverables ?? [], createdAt: existing?.createdAt ?? now, updatedAt: now, publishedAt: row.status === "Active" ? existing?.publishedAt ?? now : existing?.publishedAt }; }
 export function saveBrandCampaign(campaign: CampaignRow) { return campaignRepository.create(rowToSharedCampaign(campaign)); }
