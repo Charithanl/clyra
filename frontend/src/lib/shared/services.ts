@@ -1,7 +1,7 @@
 import { type CampaignRow } from "@/components/brand/campaigns/campaignStore";
 import { getDemoBrandCreators as getLegacyCreators } from "./mock-data";
 import { campaignRepository, creatorRepository } from "./repositories";
-import type { AuditResult, Campaign, CampaignInvitation, CampaignParticipation, ContentReview, ContentSubmission, CreatorProfile, SocialAccount, SubmissionVersion } from "@/types/shared";
+import type { AuditResult, Campaign, CampaignInvitation, CampaignParticipation, ContentReview, ContentSubmission, CreatorProfile, Notification, SocialAccount, SubmissionVersion } from "@/types/shared";
 import type { CreatorCampaignView } from "@/lib/creator/types";
 import { DEMO_CREATOR_IDENTITY } from "./identity";
 import { auditRepository, applicationRepository, invitationRepository, notificationRepository, participationRepository, reviewRepository, submissionRepository, versionRepository } from "./domain-repositories";
@@ -49,6 +49,28 @@ export const getAuditResultsForSubmission = (submissionId: string) => auditRepos
 export const getAuditResultsForVersion = (versionId: string) => auditRepository.listByVersion(versionId);
 export const createAuditResult = (record: AuditResult) => auditRepository.create(record);
 export const getNotifications = (recipientUserId?: string) => recipientUserId ? notificationRepository.listByRecipient(recipientUserId) : notificationRepository.list();
+function requireNotificationRecipient(recipientUserId: string) {
+  if (!recipientUserId.trim()) throw new Error("Notification recipient is required.");
+}
+export function getNotificationsForRecipient(recipientUserId: string) {
+  requireNotificationRecipient(recipientUserId);
+  return notificationRepository.listByRecipient(recipientUserId);
+}
+export function getUnreadNotificationCount(recipientUserId: string) {
+  return getNotificationsForRecipient(recipientUserId).filter((notification) => !notification.isRead).length;
+}
+export function createNotificationForRecipient(recipientUserId: string, notification: Omit<Notification, "recipientUserId">) {
+  requireNotificationRecipient(recipientUserId);
+  return notificationRepository.create({ ...notification, recipientUserId });
+}
+export function markNotificationReadForRecipient(recipientUserId: string, notificationId: string) {
+  requireNotificationRecipient(recipientUserId);
+  return notificationRepository.markRead(recipientUserId, notificationId);
+}
+export function markAllNotificationsReadForRecipient(recipientUserId: string) {
+  requireNotificationRecipient(recipientUserId);
+  return notificationRepository.markAllRead(recipientUserId);
+}
 export const getInvitationRecords = () => invitationRepository.list();
 export const getInvitationRecordsForCreator = (creatorId: string) => invitationRepository.listByCreator(creatorId);
 export const createInvitationRecord = (record: CampaignInvitation) => invitationRepository.create(record);

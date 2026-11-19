@@ -68,7 +68,11 @@ export interface ContentSubmissionRepository extends MutableRepository<ContentSu
 export interface SubmissionVersionRepository extends MutableRepository<SubmissionVersion> { listBySubmission(submissionId: string): SubmissionVersion[]; }
 export interface ContentReviewRepository extends MutableRepository<ContentReview> { listBySubmission(submissionId: string): ContentReview[]; }
 export interface AuditResultRepository extends MutableRepository<AuditResult> { listBySubmission(submissionId: string): AuditResult[]; listByVersion(versionId: string): AuditResult[]; }
-export interface NotificationRepository extends MutableRepository<Notification> { listByRecipient(recipientUserId: string): Notification[]; markRead(id: string): Notification | undefined; }
+export interface NotificationRepository extends MutableRepository<Notification> {
+  listByRecipient(recipientUserId: string): Notification[];
+  markRead(recipientUserId: string, id: string): Notification | undefined;
+  markAllRead(recipientUserId: string): Notification[];
+}
 
 const validateApplication = (record: CampaignApplication) => requireCreatorAndCampaign(record.campaignId, record.creatorId);
 const validateInvitation = (record: CampaignInvitation) => requireCreatorAndCampaign(record.campaignId, record.creatorId);
@@ -77,7 +81,12 @@ const validateSubmission = (record: ContentSubmission) => { requireCreatorAndCam
 const validateVersion = (record: SubmissionVersion) => { const submission = submissionRepository.getById(record.submissionId); if (!submission) throw new Error(`Submission ${record.submissionId} does not exist.`); if (record.versionNumber < 1) throw new Error("Submission version number must be at least 1."); if (record.versionNumber > submission.currentVersion) throw new Error("A version cannot exceed the submission's current version number."); if (versionRepository.listBySubmission(record.submissionId).some((item) => item.id !== record.id && item.versionNumber === record.versionNumber)) throw new Error("A submission version with this number already exists."); };
 const validateReview = (record: ContentReview) => { const submission = submissionRepository.getById(record.submissionId); const version = versionRepository.getById(record.versionId); if (!submission) throw new Error(`Submission ${record.submissionId} does not exist.`); if (!version || version.submissionId !== record.submissionId) throw new Error(`Submission version ${record.versionId} does not belong to this submission.`); };
 const validateAudit = (record: AuditResult) => { const submission = submissionRepository.getById(record.submissionId); const version = versionRepository.getById(record.versionId); if (!submission) throw new Error(`Submission ${record.submissionId} does not exist.`); if (!version || version.submissionId !== record.submissionId) throw new Error(`Submission version ${record.versionId} does not belong to this submission.`); };
-const validateNotification = (record: Notification) => { if (!record.recipientUserId) throw new Error("Notification recipient is required."); if (record.relatedEntityType && !record.relatedEntityId) throw new Error("Related notification entities require an ID."); };
+const validateNotification = (record: Notification) => {
+  if (!record.recipientUserId.trim()) throw new Error("Notification recipient is required.");
+  if (!record.type.trim() || !record.title.trim() || !record.message.trim()) throw new Error("Notification type, title, and message are required.");
+  if (!Number.isFinite(Date.parse(record.createdAt))) throw new Error("Notification creation time must be a valid date.");
+  if (record.relatedEntityType && !record.relatedEntityId) throw new Error("Related notification entities require an ID.");
+};
 
 export const applicationRepository: CampaignApplicationRepository = Object.assign(listRepository(applicationSeed, validateApplication), { listByCampaign: (id: string) => applicationRepository.list().filter((item) => item.campaignId === id), listByCreator: (id: string) => applicationRepository.list().filter((item) => item.creatorId === id) });
 const invitationBase = listRepository(invitationSeed, validateInvitation);
@@ -91,6 +100,17 @@ const reviewBase = listRepository(reviewSeed, validateReview);
 export const reviewRepository: ContentReviewRepository = { ...reviewBase, update: () => { throw new Error("Human review decisions are immutable; create a new review record."); }, listBySubmission: (id) => reviewBase.list().filter((item) => item.submissionId === id) };
 const auditBase = listRepository(auditSeed, validateAudit);
 export const auditRepository: AuditResultRepository = { ...auditBase, update: () => { throw new Error("Audit results are immutable; create a new result for a new version."); }, listBySubmission: (id) => auditBase.list().filter((item) => item.submissionId === id), listByVersion: (id) => auditBase.list().filter((item) => item.versionId === id) };
-export const notificationRepository: NotificationRepository = Object.assign(listRepository(notificationSeed, validateNotification), { listByRecipient: (id: string) => notificationRepository.list().filter((item) => item.recipientUserId === id), markRead: (id: string) => notificationRepository.update(id, { isRead: true }) });
+const notificationBase = listRepository(notificationSeed, validateNotification);
+export const notificationRepository: NotificationRepository = {
+  ...notificationBase,
+  listByRecipient: (recipientUserId) => notificationBase.list().filter((item) => item.recipientUserId === recipientUserId),
+  markRead: (recipientUserId, id) => {
+    const record = notificationBase.getById(id);
+    return record?.recipientUserId === recipientUserId ? notificationBase.update(id, { isRead: true }) : undefined;
+  },
+  markAllRead: (recipientUserId) => notificationBase.list()
+    .filter((item) => item.recipientUserId === recipientUserId)
+    .map((item) => notificationBase.update(item.id, { isRead: true })!),
+};
 
 export const sharedDomainRepositories = { applicationRepository, invitationRepository, participationRepository, submissionRepository, versionRepository, reviewRepository, auditRepository, notificationRepository };
