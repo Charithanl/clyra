@@ -1,6 +1,6 @@
-import { createContentReview, createAuditResult, getAuditResultsForVersion, getContentReviewsForSubmission, getParticipationRecord, getSubmissionRecord, getSubmissionRecordsForCreator, getSubmissionVersions, getSubmissions as getCanonicalSubmissions, updateSubmissionRecord } from "@/lib/shared/services";
+import { createContentReview, createAuditResult, createNotificationForRecipient, getAuditResultsForVersion, getContentReviewsForSubmission, getParticipationRecord, getSharedCampaignById, getSubmissionRecord, getSubmissionRecordsForCreator, getSubmissionVersions, getSubmissions as getCanonicalSubmissions, updateSubmissionRecord } from "@/lib/shared/services";
 import { toCanonicalCampaignId, toLegacyCampaignId } from "@/lib/shared/campaign-id-mapping";
-import { DEMO_CREATOR_IDENTITY } from "@/lib/shared/identity";
+import { DEMO_CREATOR_IDENTITY, getDemoUserIdForCreator } from "@/lib/shared/identity";
 import { getDemoCreatorProfile } from "@/lib/shared/mock-data";
 import { runContentAudit, getRequirements as requirementsForCampaign, type AuditCheck, type AuditStatus, type CampaignRequirements, type ReviewStatus, type SubmissionEvent } from "@/lib/services/audit-service";
 import type { AuditResult as CanonicalAudit, ContentReview as CanonicalReview, ContentSubmission, SubmissionVersion } from "@/types/shared";
@@ -52,7 +52,35 @@ export function updateSubmission(id: string, changes: Partial<Submission>) {
     const decision = status === "APPROVED" ? "APPROVED" : status === "REJECTED" ? "REJECTED" : "REVISION_REQUESTED";
     pendingDecision.set(id, { decision, reviewerId: changes.reviewer ?? "Alex Morgan", feedback: changes.reviewerNote ?? "" });
     const versionId = currentVersionId({ ...current, currentVersion: current.currentVersion });
-    if (versionId) { const reviewId = `review-${id}-v${current.currentVersion}-${decision.toLowerCase()}-${Date.now()}`; const pending = pendingDecision.get(id)!; createContentReview({ id: reviewId, submissionId: id, versionId, reviewerId: pending.reviewerId, decision, feedback: pending.feedback, reviewedAt: new Date().toISOString() }); pendingDecision.set(id, { ...pending, reviewId } as typeof pending); }
+    if (versionId) {
+      const reviewId = `review-${id}-v${current.currentVersion}-${decision.toLowerCase()}-${Date.now()}`;
+      const pending = pendingDecision.get(id)!;
+      const review = createContentReview({ id: reviewId, submissionId: id, versionId, reviewerId: pending.reviewerId, decision, feedback: pending.feedback, reviewedAt: new Date().toISOString() });
+      pendingDecision.set(id, { ...pending, reviewId } as typeof pending);
+      const recipientUserId = getDemoUserIdForCreator(current.creatorId);
+      if (!recipientUserId) {
+        if (process.env.NODE_ENV !== "production") console.warn(`[creator-notifications] Review ${review.id} was saved, but no demo recipient mapping exists for creator ${current.creatorId}.`);
+      } else {
+        const campaignName = getSharedCampaignById(current.campaignId)?.title ?? "your campaign";
+        const title = decision === "APPROVED" ? "Your content was approved" : decision === "REJECTED" ? "Your content was rejected" : "Revision requested for your content";
+        const feedback = pending.feedback.trim();
+        const message = `${campaignName}: ${decision === "APPROVED" ? "Your submission has been approved." : decision === "REJECTED" ? "Your submission was rejected." : "Please revise your submission."}${feedback ? ` ${feedback}` : ""}`;
+        try {
+          createNotificationForRecipient(recipientUserId, {
+            id: `notification-review-${encodeURIComponent(current.id)}-${encodeURIComponent(versionId)}-${decision.toLowerCase()}`,
+            type: "CONTENT_REVIEW",
+            title,
+            message,
+            relatedEntityType: "ContentSubmission",
+            relatedEntityId: current.id,
+            isRead: false,
+            createdAt: review.reviewedAt,
+          });
+        } catch (error) {
+          if (process.env.NODE_ENV !== "production") console.error(`[creator-notifications] Review ${review.id} was saved, but its notification could not be created.`, error);
+        }
+      }
+    }
   }
   return getSubmission(id);
 }

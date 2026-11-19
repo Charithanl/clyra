@@ -61,6 +61,11 @@ export function getUnreadNotificationCount(recipientUserId: string) {
 }
 export function createNotificationForRecipient(recipientUserId: string, notification: Omit<Notification, "recipientUserId">) {
   requireNotificationRecipient(recipientUserId);
+  const existing = notificationRepository.getById(notification.id);
+  if (existing) {
+    if (existing.recipientUserId !== recipientUserId) throw new Error(`Notification ID ${notification.id} belongs to another recipient.`);
+    return existing;
+  }
   return notificationRepository.create({ ...notification, recipientUserId });
 }
 export function markNotificationReadForRecipient(recipientUserId: string, notificationId: string) {

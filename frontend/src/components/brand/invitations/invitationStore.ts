@@ -1,6 +1,6 @@
-import { createInvitationRecord, getInvitationRecords, hasActiveInvitationRecord, updateInvitationRecord } from "@/lib/shared/services";
+import { createInvitationRecord, createNotificationForRecipient, getInvitationRecords, getSharedCampaignById, hasActiveInvitationRecord, updateInvitationRecord } from "@/lib/shared/services";
 import { toCanonicalCampaignId, toLegacyCampaignId } from "@/lib/shared/campaign-id-mapping";
-import { DEMO_CREATOR_IDENTITY } from "@/lib/shared/identity";
+import { DEMO_CREATOR_IDENTITY, getDemoUserIdForCreator } from "@/lib/shared/identity";
 import type { CampaignInvitation } from "@/types/shared";
 
 export type InvitationStatus = "Pending" | "Accepted" | "Declined" | "Expired" | "Cancelled";
@@ -16,4 +16,29 @@ const toCanonical = (invitation: Invitation): CampaignInvitation | undefined => 
 export function getInvitations(): Invitation[] { return getInvitationRecords().map(toDisplay).filter((item): item is Invitation => Boolean(item)); }
 export function updateInvitation(id: string, changes: Partial<Invitation>) { const current = getInvitationRecords().find((item) => item.id === id); if (!current) return undefined; const nextStatus = changes.status ? statusToCanonical(changes.status) : current.status; return updateInvitationRecord(id, { status: nextStatus, respondedAt: changes.respondedAt ? new Date(changes.respondedAt).toISOString() : current.respondedAt, message: changes.message ?? current.message }); }
 export function hasActiveInvitation(creatorId: string, campaignId: number) { const canonicalCampaignId = toCanonicalCampaignId(campaignId); return canonicalCampaignId ? hasActiveInvitationRecord(canonicalCampaignId, creatorToCanonical(creatorId)) : false; }
-export function addInvitation(invitation: Invitation) { const record = toCanonical(invitation); if (!record || hasActiveInvitationRecord(record.campaignId, record.creatorId)) return false; createInvitationRecord(record); return true; }
+export function addInvitation(invitation: Invitation) {
+  const record = toCanonical(invitation);
+  if (!record || hasActiveInvitationRecord(record.campaignId, record.creatorId)) return false;
+  const created = createInvitationRecord(record);
+  const recipientUserId = getDemoUserIdForCreator(created.creatorId);
+  if (!recipientUserId) {
+    if (process.env.NODE_ENV !== "production") console.warn(`[creator-notifications] Invitation ${created.id} was saved, but no demo recipient mapping exists for creator ${created.creatorId}.`);
+    return true;
+  }
+  const campaignName = getSharedCampaignById(created.campaignId)?.title ?? "your campaign";
+  try {
+    createNotificationForRecipient(recipientUserId, {
+      id: `notification-invitation-${encodeURIComponent(created.id)}`,
+      type: "CAMPAIGN_INVITATION",
+      title: "New campaign invitation",
+      message: `You have been invited to ${campaignName}.`,
+      relatedEntityType: "CampaignInvitation",
+      relatedEntityId: created.id,
+      isRead: false,
+      createdAt: created.sentAt,
+    });
+  } catch (error) {
+    if (process.env.NODE_ENV !== "production") console.error(`[creator-notifications] Invitation ${created.id} was saved, but its notification could not be created.`, error);
+  }
+  return true;
+}
