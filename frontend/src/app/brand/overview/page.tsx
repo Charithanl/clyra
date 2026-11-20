@@ -1,10 +1,190 @@
+"use client";
+
 import Link from "next/link";
-import { ArrowUpRight, BarChart3, CalendarDays, Check, ChevronDown, FileCheck2, Megaphone, Plus, Send, Users } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ArrowUpRight, BarChart3, CalendarDays, Check, FileCheck2, Megaphone, Plus, Send, Users } from "lucide-react";
+import type { CampaignRow } from "@/components/brand/campaigns/campaignStore";
+import type { Campaign, CampaignInvitation, CampaignParticipation, ContentReview, ContentSubmission, CreatorProfile } from "@/types/shared";
+import { getBrandCampaignRows, getContentReviews, getCreatorProfiles, getInvitationRecords, getParticipations, getSharedCampaignById, getSubmissions } from "@/lib/shared/services";
 
-const campaigns = [{ name: "Summer Style Stories", platform: "Instagram · YouTube", creators: "18", budget: "$24,000", deadline: "Jun 30, 2026", status: "Active" }, { name: "Everyday Beauty Edit", platform: "Instagram", creators: "12", budget: "$12,500", deadline: "Jul 12, 2026", status: "Active" }, { name: "Tech Made Simple", platform: "YouTube", creators: "8", budget: "$8,200", deadline: "Aug 04, 2026", status: "Draft" }, { name: "The Sustainable Living Project", platform: "Instagram · YouTube", creators: "24", budget: "$31,000", deadline: "May 28, 2026", status: "Completed" }];
-const actions = [{ icon: Users, title: "3 new creator applications", detail: "Summer Style Stories", time: "Today", link: "/brand/creators" }, { icon: Send, title: "5 invitations awaiting response", detail: "Everyday Beauty Edit", time: "Yesterday", link: "/brand/invitations" }, { icon: FileCheck2, title: "8 submissions need review", detail: "Across 3 campaigns", time: "Today", link: "/brand/content-review" }, { icon: CalendarDays, title: "Campaign deadline approaching", detail: "Sustainable Living · 3 days", time: "May 25", link: "/brand/campaigns" }];
-const activity = [{ text: "Maya Brooks accepted an invitation", detail: "Summer Style Stories", time: "12 min ago", tone: "green" }, { text: "Everyday Beauty Edit was published", detail: "by Alex Morgan", time: "46 min ago", tone: "yellow" }, { text: "Noah Williams submitted content", detail: "Move with intention · Reel", time: "1 hour ago", tone: "rose" }, { text: "Summer Style Stories hit 1M reach", detail: "Performance milestone", time: "2 hours ago", tone: "wine" }];
+type Activity = { id: string; text: string; detail: string; timestamp: string; tone: string };
+type DashboardData = {
+  campaigns: CampaignRow[];
+  creators: CreatorProfile[];
+  invitations: CampaignInvitation[];
+  participations: CampaignParticipation[];
+  submissions: ContentSubmission[];
+  reviews: ContentReview[];
+  campaignRecords: Campaign[];
+  campaignRecordByRowId: Map<number, Campaign>;
+  now: Date;
+};
 
-export default function BrandOverviewPage() { return <div className="brand-content"><section className="brand-welcome"><div><div className="brand-overline">THURSDAY, NOVEMBER 13, 2026</div><h1>Good morning, Alex.</h1><p>Here&apos;s what&apos;s happening with your creator campaigns today.</p></div><Link className="brand-create-button" href="/brand/campaigns"><Plus size={16} /> Create Campaign</Link></section><section className="brand-metric-grid"><Metric icon={<Megaphone />} label="Active Campaigns" value="12" note="+2 this month" /><Metric icon={<Users />} label="Total Creators" value="248" note="Across all campaigns" /><Metric icon={<FileCheck2 />} label="Pending Reviews" value="08" note="Requires your attention" highlight /><Metric icon={<BarChart3 />} label="Total Reach" value="1.2M" note="+12.8% this month" /></section><section className="brand-panel brand-chart-panel"><div className="brand-panel-head"><div><h2>Campaign Performance</h2><p>Track your campaign reach and engagement over time.</p></div><button className="brand-date-select"><CalendarDays size={14} /> Last 30 days <ChevronDown size={13} /></button></div><div className="chart-summary"><strong>2.84M</strong><span>Reach <b>↗ 24.8%</b></span><span>Engagement <b>↗ 6.2%</b></span></div><div className="brand-chart"><div className="chart-y"><span>3M</span><span>2M</span><span>1M</span><span>0</span></div><svg viewBox="0 0 900 180" preserveAspectRatio="none"><defs><linearGradient id="brand-area" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor="#aa1945" stopOpacity=".18" /><stop offset="1" stopColor="#aa1945" stopOpacity="0" /></linearGradient></defs><path d="M0,140 L40,126 L80,132 L120,104 L160,117 L200,88 L240,105 L280,79 L320,92 L360,63 L400,76 L440,49 L480,62 L520,41 L560,51 L600,28 L640,41 L680,20 L720,32 L760,16 L810,24 L850,8 L900,14 L900,180 L0,180 Z" fill="url(#brand-area)" /><path d="M0,140 L40,126 L80,132 L120,104 L160,117 L200,88 L240,105 L280,79 L320,92 L360,63 L400,76 L440,49 L480,62 L520,41 L560,51 L600,28 L640,41 L680,20 L720,32 L760,16 L810,24 L850,8 L900,14" fill="none" stroke="#aa1945" strokeWidth="3" vectorEffect="non-scaling-stroke" /></svg></div><div className="chart-x"><span>May 1</span><span>May 8</span><span>May 15</span><span>May 22</span><span>May 29</span><span>Jun 5</span></div></section><div className="brand-two-col"><section className="brand-panel"><PanelHead title="Active Campaigns" action="View All Campaigns" href="/brand/campaigns" /><div className="brand-table"><div className="brand-table-head"><span>CAMPAIGN</span><span>PLATFORM</span><span>CREATORS</span><span>BUDGET</span><span>STATUS</span></div>{campaigns.map((campaign) => <div className="brand-table-row" key={campaign.name}><span><b>{campaign.name}</b><small>{campaign.deadline}</small></span><span>{campaign.platform}</span><span>{campaign.creators}</span><span>{campaign.budget}</span><span><em className={`brand-status ${campaign.status.toLowerCase()}`}>{campaign.status}</em></span></div>)}</div></section><section className="brand-panel"><PanelHead title="Pending Actions" action="View all" href="/brand/content-review" /><div className="brand-action-list">{actions.map(({ icon: Icon, title, detail, time, link }) => <Link className="brand-action-row" href={link} key={title}><span className="brand-action-icon"><Icon size={14} /></span><span><b>{title}</b><small>{detail}</small></span><time>{time}</time></Link>)}</div></section></div><div className="brand-two-col bottom-grid"><section className="brand-panel"><PanelHead title="Recent Activity" action="See all" href="/brand/analytics" /><div className="brand-activity-list">{activity.map((item) => <div className="brand-activity-row" key={item.text}><i className={item.tone}><Check size={12} /></i><span><b>{item.text}</b><small>{item.detail}</small></span><time>{item.time}</time></div>)}</div></section><section className="brand-panel quick-actions"><PanelHead title="Quick Actions" action="" href="#" /><Link href="/brand/campaigns"><Plus size={15} /> Create Campaign <ArrowUpRight size={13} /></Link><Link href="/brand/creators"><Users size={15} /> Find Creators <ArrowUpRight size={13} /></Link><Link href="/brand/content-review"><FileCheck2 size={15} /> Review Submissions <ArrowUpRight size={13} /></Link><Link href="/brand/analytics"><BarChart3 size={15} /> View Analytics <ArrowUpRight size={13} /></Link></section></div></div>; }
-function Metric({ icon, label, value, note, highlight = false }: { icon: React.ReactNode; label: string; value: string; note: string; highlight?: boolean }) { return <article className={highlight ? "brand-metric highlight" : "brand-metric"}><div><span>{label}</span>{icon}</div><strong>{value}</strong><small>{note}</small></article>; }
-function PanelHead({ title, action, href }: { title: string; action: string; href: string }) { return <div className="brand-panel-head"><div><h2>{title}</h2></div>{action ? <Link className="brand-panel-link" href={href}>{action} <ArrowUpRight size={13} /></Link> : null}</div>; }
+function loadDashboardData(): DashboardData {
+  const campaigns = getBrandCampaignRows();
+  const campaignRecordByRowId = new Map<number, Campaign>();
+  for (const campaign of campaigns) {
+    const record = getSharedCampaignById(`brand-${campaign.id}`);
+    if (record) campaignRecordByRowId.set(campaign.id, record);
+  }
+  const campaignRecords = [...campaignRecordByRowId.values()];
+  const campaignIds = new Set(campaignRecords.map((campaign) => campaign.id));
+  const invitations = getInvitationRecords().filter((invitation) => campaignIds.has(invitation.campaignId));
+  const participations = getParticipations().filter((participation) => campaignIds.has(participation.campaignId));
+  const submissions = getSubmissions().filter((submission) => campaignIds.has(submission.campaignId));
+  const submissionIds = new Set(submissions.map((submission) => submission.id));
+
+  return {
+    campaigns,
+    creators: getCreatorProfiles(),
+    invitations,
+    participations,
+    submissions,
+    reviews: getContentReviews().filter((review) => submissionIds.has(review.submissionId)),
+    campaignRecords,
+    campaignRecordByRowId,
+    now: new Date(),
+  };
+}
+
+function dateLabel(value: string | Date) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(date.getTime())) return "Date unavailable";
+  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(date);
+}
+
+function recentActivities(data: DashboardData): Activity[] {
+  const campaignNames = new Map(data.campaignRecords.map((campaign) => [campaign.id, campaign.title]));
+  const creatorNames = new Map(data.creators.map((creator) => [creator.id, creator.displayName]));
+  const submissionMap = new Map(data.submissions.map((submission) => [submission.id, submission]));
+  const items: Activity[] = [];
+
+  for (const campaign of data.campaignRecords) {
+    if (campaign.createdAt) items.push({ id: `campaign-created-${campaign.id}`, text: "Campaign created", detail: campaign.title, timestamp: campaign.createdAt, tone: "wine" });
+    if (campaign.publishedAt) items.push({ id: `campaign-published-${campaign.id}`, text: "Campaign published", detail: campaign.title, timestamp: campaign.publishedAt, tone: "yellow" });
+  }
+  for (const invitation of data.invitations) {
+    items.push({ id: `invitation-sent-${invitation.id}`, text: "Creator invitation sent", detail: campaignNames.get(invitation.campaignId) ?? "Campaign", timestamp: invitation.sentAt, tone: "green" });
+    if (invitation.respondedAt) {
+      const response = invitation.status === "ACCEPTED" ? "accepted" : invitation.status === "DECLINED" ? "declined" : "responded to";
+      items.push({ id: `invitation-response-${invitation.id}`, text: `Creator ${response} an invitation`, detail: campaignNames.get(invitation.campaignId) ?? "Campaign", timestamp: invitation.respondedAt, tone: invitation.status === "ACCEPTED" ? "green" : "rose" });
+    }
+  }
+  for (const submission of data.submissions) {
+    if (submission.submittedAt) {
+      const creator = creatorNames.get(submission.creatorId);
+      items.push({ id: `submission-${submission.id}`, text: creator ? `${creator} submitted content` : "Creator submitted content", detail: campaignNames.get(submission.campaignId) ?? "Campaign", timestamp: submission.submittedAt, tone: "rose" });
+    }
+  }
+  for (const review of data.reviews) {
+    const submission = submissionMap.get(review.submissionId);
+    const decision = review.decision === "APPROVED" ? "Content approved" : review.decision === "REJECTED" ? "Content rejected" : "Revision requested";
+    items.push({ id: `review-${review.id}`, text: decision, detail: submission ? campaignNames.get(submission.campaignId) ?? "Campaign" : "Submission", timestamp: review.reviewedAt, tone: review.decision === "APPROVED" ? "green" : review.decision === "REJECTED" ? "rose" : "yellow" });
+  }
+
+  return items
+    .filter((item) => Number.isFinite(Date.parse(item.timestamp)) && Date.parse(item.timestamp) <= data.now.getTime())
+    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
+    .slice(0, 5);
+}
+
+export default function BrandOverviewPage() {
+  const [data, setData] = useState<DashboardData | null>(null);
+  const [error, setError] = useState("");
+  const [reload, setReload] = useState(0);
+
+  useEffect(() => {
+    try {
+      setData(loadDashboardData());
+      setError("");
+    } catch {
+      setError("Dashboard data could not be loaded. Please try again.");
+    }
+  }, [reload]);
+
+  if (error) {
+    return <div className="brand-content"><div className="brand-placeholder" role="alert"><h1>Dashboard unavailable</h1><p>{error}</p><button className="brand-create-button" onClick={() => { setData(null); setReload((value) => value + 1); }}>Retry</button></div></div>;
+  }
+
+  if (!data) {
+    return <div className="brand-content"><div className="brand-placeholder" role="status"><h1>Loading dashboard…</h1><p>Loading the latest workspace records.</p></div></div>;
+  }
+
+  const activeCampaigns = data.campaigns.filter((campaign) => campaign.status === "Active");
+  const draftCount = data.campaigns.filter((campaign) => campaign.status === "Draft").length;
+  const completedCount = data.campaigns.filter((campaign) => campaign.status === "Completed").length;
+  const pendingInvitations = data.invitations.filter((invitation) => invitation.status === "PENDING");
+  const pendingSubmissions = [...new Map(data.submissions
+    .filter((submission) => submission.status === "SUBMITTED" || submission.status === "UNDER_REVIEW")
+    .map((submission) => [submission.id, submission])).values()];
+  const pendingReviewIds = new Set(pendingSubmissions.map((submission) => submission.id));
+  const activity = recentActivities(data);
+  const today = new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" }).format(data.now);
+
+  return (
+    <div className="brand-content">
+      <section className="brand-welcome">
+        <div><div className="brand-overline">{today}</div><h1>Good morning, Alex.</h1><p>Here&apos;s what&apos;s happening with your creator campaigns today.</p></div>
+        <Link className="brand-create-button" href="/brand/campaigns"><Plus size={16} /> Create Campaign</Link>
+      </section>
+
+      <section className="brand-metric-grid" aria-label="Workspace metrics">
+        <Metric icon={<Megaphone />} label="Total Campaigns" value={data.campaigns.length} note="Across this workspace" />
+        <Metric icon={<Megaphone />} label="Active Campaigns" value={activeCampaigns.length} note="Published campaigns" />
+        <Metric icon={<CalendarDays />} label="Draft Campaigns" value={draftCount} note="Not yet published" />
+        <Metric icon={<Check />} label="Completed Campaigns" value={completedCount} note="Completed records" />
+        <Metric icon={<Users />} label="Creator Profiles" value={data.creators.length} note="Available creator profiles" />
+        <Metric icon={<Send />} label="Pending Invitations" value={pendingInvitations.length} note="Awaiting creator response" />
+        <Metric icon={<FileCheck2 />} label="Pending Reviews" value={pendingReviewIds.size} note="Submitted or under review" highlight />
+      </section>
+
+      <section className="brand-panel brand-chart-panel">
+        <div className="brand-panel-head"><div><h2>Campaign Performance</h2><p>Historical reach and engagement are not available in the current campaign records.</p></div><span className="brand-date-select"><CalendarDays size={14} /> {dateLabel(data.now)}</span></div>
+        <div className="brand-empty-state" role="status" style={{ display: "grid", justifyItems: "center", gap: 6, minHeight: 150, padding: 20, color: "var(--muted)", textAlign: "center" }}><BarChart3 size={20} /><span>Performance chart unavailable</span><small>Reach and engagement time-series data has not been recorded yet.</small></div>
+      </section>
+
+      <div className="brand-two-col">
+        <section className="brand-panel">
+          <PanelHead title="Active Campaigns" action="View All Campaigns" href="/brand/campaigns" />
+          {activeCampaigns.length ? <div className="brand-table"><div className="brand-table-head"><span>CAMPAIGN</span><span>PLATFORM</span><span>CREATORS</span><span>BUDGET</span><span>STATUS</span></div>{activeCampaigns.slice(0, 5).map((campaign) => { const canonical = data.campaignRecordByRowId.get(campaign.id); const creatorCount = canonical ? new Set(data.participations.filter((participation) => participation.campaignId === canonical.id).map((participation) => participation.creatorId)).size : 0; return <div className="brand-table-row" key={campaign.id}><span><b>{campaign.name}</b><small>Ends {dateLabel(campaign.end)}</small></span><span>{campaign.platforms.join(" · ") || "—"}</span><span>{creatorCount}</span><span>{campaign.budget}</span><span><em className={`brand-status ${campaign.status.toLowerCase()}`}>{campaign.status}</em></span></div>; })}</div> : <EmptyState message="There are no active campaigns in this workspace." />}
+        </section>
+
+        <section className="brand-panel">
+          <PanelHead title="Pending Actions" action="View all" href="/brand/content-review" />
+          <div className="brand-action-list">
+            {pendingReviewIds.size ? <Link className="brand-action-row" href="/brand/content-review"><span className="brand-action-icon"><FileCheck2 size={14} /></span><span><b>{pendingReviewIds.size} submissions need review</b><small>Submitted or currently under review</small></span><span aria-hidden="true">›</span></Link> : null}
+            {pendingInvitations.length ? <Link className="brand-action-row" href="/brand/invitations"><span className="brand-action-icon"><Send size={14} /></span><span><b>{pendingInvitations.length} invitations awaiting response</b><small>Pending canonical invitation records</small></span><span aria-hidden="true">›</span></Link> : null}
+            {draftCount ? <Link className="brand-action-row" href="/brand/campaigns"><span className="brand-action-icon"><Megaphone size={14} /></span><span><b>{draftCount} draft campaigns</b><small>Ready for review and publishing</small></span><span aria-hidden="true">›</span></Link> : null}
+            {!pendingReviewIds.size && !pendingInvitations.length && !draftCount ? <EmptyState message="There are no outstanding actions." /> : null}
+          </div>
+        </section>
+      </div>
+
+      <div className="brand-two-col bottom-grid">
+        <section className="brand-panel">
+          <PanelHead title="Recent Activity" action="See all" href="/brand/analytics" />
+          {activity.length ? <div className="brand-activity-list">{activity.map((item) => <div className="brand-activity-row" key={item.id}><i className={item.tone}><Check size={12} /></i><span><b>{item.text}</b><small>{item.detail}</small></span><time dateTime={item.timestamp}>{dateLabel(item.timestamp)}</time></div>)}</div> : <EmptyState message="No dated campaign, invitation, submission, or review activity is available." />}
+        </section>
+        <section className="brand-panel quick-actions">
+          <PanelHead title="Quick Actions" action="" href="#" />
+          <Link href="/brand/campaigns"><Plus size={15} /> Create Campaign <ArrowUpRight size={13} /></Link>
+          <Link href="/brand/creators"><Users size={15} /> Find Creators <ArrowUpRight size={13} /></Link>
+          <Link href="/brand/content-review"><FileCheck2 size={15} /> Review Submissions <ArrowUpRight size={13} /></Link>
+          <Link href="/brand/analytics"><BarChart3 size={15} /> View Analytics <ArrowUpRight size={13} /></Link>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function Metric({ icon, label, value, note, highlight = false }: { icon: React.ReactNode; label: string; value: number; note: string; highlight?: boolean }) {
+  return <article className={highlight ? "brand-metric highlight" : "brand-metric"}><div><span>{label}</span>{icon}</div><strong>{value}</strong><small>{note}</small></article>;
+}
+
+function PanelHead({ title, action, href }: { title: string; action: string; href: string }) {
+  return <div className="brand-panel-head"><div><h2>{title}</h2></div>{action ? <Link className="brand-panel-link" href={href}>{action} <ArrowUpRight size={13} /></Link> : null}</div>;
+}
+
+function EmptyState({ message }: { message: string }) {
+  return <div className="brand-empty-state" style={{ display: "grid", placeItems: "center", minHeight: 70, padding: 16, color: "var(--muted)", textAlign: "center", fontSize: 10 }}>{message}</div>;
+}
