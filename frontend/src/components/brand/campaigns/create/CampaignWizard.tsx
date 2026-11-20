@@ -4,8 +4,9 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ArrowRight, CalendarDays, Check, ChevronDown, Plus, Trash2, Upload } from "lucide-react";
-import { type CampaignRow } from "../campaignStore";
-import { saveBrandCampaign } from "@/lib/shared/services";
+import { createCampaign, getSharedCampaignById } from "@/lib/shared/services";
+import { canonicalIdForNewCampaign } from "@/lib/shared/campaign-id-mapping";
+import type { Campaign, CampaignDeliverable, SocialPlatform } from "@/types/shared";
 import "./campaign-wizard.css";
 
 const stepLabels = ["Basic Information", "Platforms & Audience", "Campaign Brief", "Deliverables", "Budget & Timeline", "Review & Publish"];
@@ -15,14 +16,154 @@ type Draft = { name: string; brand: string; description: string; objective: stri
 
 const emptyDraft: Draft = { name: "", brand: "Aurelia Fashion", description: "", objective: "", category: "", type: "", platforms: [], formats: {}, location: "", age: "", gender: "All", interests: "", preferredNiches: [], creatorSize: [], objectiveDetails: "", keyMessages: "", hashtags: "", mentions: "", keywords: "", disclosure: "Paid partnership disclosure", guidelines: "", references: "", deliverables: [{ platform: "Instagram", format: "Reel", quantity: "1", description: "", submission: "", publication: "" }], currency: "INR (₹)", compensation: "Fixed Payment", compensationDetails: "", minBudget: "", maxBudget: "", start: "", end: "", applicationDeadline: "", selectionDeadline: "", submissionDeadline: "", publicationDate: "" };
 
+function isValidDateInput(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+function dateToIso(value: string, endOfDay = false) {
+  return `${value}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}Z`;
+}
+
+function splitEntries(value: string) {
+  return value.split(/[\r\n,]+/).map((entry) => entry.trim()).filter(Boolean);
+}
+
+function splitLines(value: string) {
+  return value.split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean);
+}
+
+function numericBudget(value: string) {
+  if (!value.trim()) return undefined;
+  const amount = Number(value.replace(/,/g, "").replace(/[^\d.-]/g, ""));
+  return Number.isFinite(amount) && amount >= 0 ? amount : Number.NaN;
+}
+
+function campaignId() {
+  let legacyId = Date.now();
+  while (getSharedCampaignById(`brand-${legacyId}`)) legacyId += 1;
+  return canonicalIdForNewCampaign(legacyId);
+}
+
+function toCanonicalCampaign(draft: Draft, status: "Active" | "Draft"): Campaign {
+  const id = campaignId();
+  const now = new Date().toISOString();
+  const list = (value: string) => splitEntries(value);
+  const wizardRequirements = [
+    ...splitLines(draft.guidelines),
+    ...splitLines(draft.keyMessages).map((value) => `Key message: ${value}`),
+    ...splitLines(draft.objectiveDetails).map((value) => `Objective detail: ${value}`),
+    ...splitLines(draft.compensationDetails).map((value) => `Compensation detail: ${value}`),
+    ...(draft.type ? [`Campaign type: ${draft.type}`] : []),
+    ...splitLines(draft.references).map((value) => `Reference link: ${value}`),
+    ...Object.entries(draft.formats).flatMap(([platform, formats]) => formats.map((format) => `${platform} format: ${format}`)),
+    ...draft.preferredNiches.map((value) => `Preferred creator niche: ${value}`),
+    ...draft.creatorSize.map((value) => `Preferred creator size: ${value}`),
+    ...(draft.selectionDeadline ? [`Creator selection deadline: ${draft.selectionDeadline}`] : []),
+    ...(draft.submissionDeadline ? [`Campaign submission deadline: ${draft.submissionDeadline}`] : []),
+    ...(draft.publicationDate ? [`Expected publication date: ${draft.publicationDate}`] : []),
+  ];
+  const deliverables: CampaignDeliverable[] = draft.deliverables.map((item, index) => ({
+    id: `${id}-deliverable-${index + 1}`,
+    campaignId: id,
+    title: item.format.trim() || `Deliverable ${index + 1}`,
+    description: item.description.trim(),
+    platform: item.platform === "Instagram" ? "INSTAGRAM" : "YOUTUBE",
+    contentType: item.format,
+    dueDate: item.submission ? dateToIso(item.submission, true) : "TBD",
+    requirements: [
+      `Quantity: ${item.quantity}`,
+      ...(item.publication ? [`Publication deadline: ${item.publication}`] : []),
+    ],
+  }));
+  const budgetAmount = numericBudget(draft.minBudget);
+  const maximumBudget = numericBudget(draft.maxBudget);
+  return {
+    id,
+    organizationId: "org-studio-north",
+    clientBrandId: draft.brand,
+    organizationName: "Studio North",
+    title: draft.name.trim(),
+    description: draft.description,
+    objectives: [draft.objective, ...splitLines(draft.objectiveDetails)].filter(Boolean),
+    industry: "Creator marketing",
+    categories: [draft.category],
+    platforms: draft.platforms.map((platform) => platform === "Instagram" ? "INSTAGRAM" : "YOUTUBE") as SocialPlatform[],
+    targetAudience: [
+      draft.location && `Location: ${draft.location}`,
+      draft.age && `Age: ${draft.age}`,
+      draft.gender && `Gender: ${draft.gender}`,
+      draft.interests && `Interests: ${draft.interests}`,
+    ].filter(Boolean).join("; "),
+    budget: {
+      ...(budgetAmount !== undefined && !Number.isNaN(budgetAmount) ? { min: budgetAmount } : {}),
+      ...(maximumBudget !== undefined && !Number.isNaN(maximumBudget) ? { max: maximumBudget } : {}),
+      currency: draft.currency.split(" ")[0],
+    },
+    compensationType: draft.compensation,
+    startDate: dateToIso(draft.start),
+    endDate: dateToIso(draft.end, true),
+    applicationDeadline: dateToIso(draft.applicationDeadline, true),
+    status: status === "Active" ? "PUBLISHED" : "DRAFT",
+    requirements: wizardRequirements,
+    hashtags: list(draft.hashtags),
+    brandMentions: list(draft.mentions),
+    keywords: list(draft.keywords),
+    disclosureRequirements: list(draft.disclosure),
+    deliverables,
+    createdAt: now,
+    updatedAt: now,
+    ...(status === "Active" ? { publishedAt: now } : {}),
+  };
+}
+
 export default function CampaignWizard() {
   const router = useRouter();
   const [step, setStep] = useState(0); const [draft, setDraft] = useState<Draft>(emptyDraft); const [error, setError] = useState(""); const [saving, setSaving] = useState(false); const [published, setPublished] = useState(false);
   function update<K extends keyof Draft>(key: K, value: Draft[K]) { setDraft((current) => ({ ...current, [key]: value })); setError(""); }
-  function validate(target = step) { if (target === 0 && (!draft.name.trim() || !draft.brand || !draft.objective || !draft.category || !draft.type)) return "Add a campaign name, client brand, objective, category and type."; if (target === 1 && draft.platforms.length === 0) return "Select at least one campaign platform."; if (target === 3 && draft.deliverables.length === 0) return "Add at least one deliverable."; if (target === 4) { if (!draft.start || !draft.end) return "Add a campaign start and end date."; if (new Date(draft.end) <= new Date(draft.start)) return "Campaign end date must be after the start date."; } return ""; }
+  function validate(target = step, forPublish = false) {
+    if (target === 0 && (!draft.name.trim() || !draft.brand || !draft.objective || !draft.category || !draft.type)) return "Add a campaign name, client brand, objective, category and type.";
+    if (target === 1 && draft.platforms.length === 0) return "Select at least one campaign platform.";
+    if (target === 3) {
+      if (draft.deliverables.length === 0) return "Add at least one deliverable.";
+      for (const [index, item] of draft.deliverables.entries()) {
+        if (item.submission && !isValidDateInput(item.submission)) return `Enter a valid submission deadline for deliverable ${index + 1}.`;
+        if (item.publication && !isValidDateInput(item.publication)) return `Enter a valid publication deadline for deliverable ${index + 1}.`;
+      }
+    }
+    if (target === 4) {
+      if (!draft.start || !draft.end || !draft.applicationDeadline) return "Add the campaign start date, end date and application deadline.";
+      for (const [label, value] of [["start date", draft.start], ["end date", draft.end], ["application deadline", draft.applicationDeadline]] as const) {
+        if (!isValidDateInput(value)) return `Enter a valid campaign ${label}.`;
+      }
+      for (const [label, value] of [["creator selection deadline", draft.selectionDeadline], ["content submission deadline", draft.submissionDeadline], ["expected publication date", draft.publicationDate]] as const) {
+        if (value && !isValidDateInput(value)) return `Enter a valid ${label}.`;
+      }
+      if (draft.end <= draft.start) return "Campaign end date must be after the start date.";
+      if (draft.applicationDeadline > draft.start) return "Application deadline must be on or before the campaign start date.";
+      if (forPublish && draft.applicationDeadline < new Date().toISOString().slice(0, 10)) return "Application deadline must be today or later to publish this campaign.";
+      if (Number.isNaN(numericBudget(draft.minBudget))) return "Enter a valid non-negative campaign budget.";
+    }
+    return "";
+  }
   function next() { const message = validate(); if (message) { setError(message); return; } setStep(Math.min(5, step + 1)); }
   function goTo(nextStep: number) { if (nextStep <= step) { setStep(nextStep); setError(""); } }
-  function finish(status: "Active" | "Draft") { for (let index = 0; index <= 4; index += 1) { const message = validate(index); if (message) { setStep(index); setError(message); return; } } setSaving(true); const campaign: CampaignRow = { id: Date.now(), name: draft.name, description: draft.description || draft.objectiveDetails || "Creator marketing campaign.", brand: draft.brand, platforms: draft.platforms, creators: 0, accepted: 0, budget: draft.minBudget ? `${draft.currency.split(" ")[0]}${draft.minBudget}` : "Budget TBD", start: draft.start || "TBD", end: draft.end || "TBD", status }; saveBrandCampaign(campaign); window.setTimeout(() => { setSaving(false); setPublished(status === "Active"); window.setTimeout(() => router.push("/brand/campaigns"), 700); }, 450); }
+  function finish(status: "Active" | "Draft") {
+    for (let index = 0; index <= 4; index += 1) {
+      const message = validate(index, status === "Active");
+      if (message) { setStep(index); setError(message); return; }
+    }
+    setSaving(true);
+    setError("");
+    try {
+      createCampaign(toCanonicalCampaign(draft, status));
+      window.setTimeout(() => { setSaving(false); setPublished(status === "Active"); window.setTimeout(() => router.push("/brand/campaigns"), 700); }, 450);
+    } catch (cause) {
+      setSaving(false);
+      setError(cause instanceof Error ? cause.message : "Campaign could not be saved. Please try again.");
+    }
+  }
   return <div className="brand-content wizard-page"><div className="wizard-breadcrumb"><Link href="/brand/campaigns">Campaigns</Link><span>/</span><b>Create Campaign</b></div><section className="wizard-heading"><div><div className="brand-overline">CAMPAIGN BUILDER</div><h1>Create a Campaign</h1><p>Set up your campaign, define your requirements and find the right creators.</p></div><div className="wizard-heading-actions"><Link href="/brand/campaigns">Cancel</Link><button onClick={() => finish("Draft")} disabled={saving}>Save as Draft</button></div></section><div className="wizard-shell"><div className="wizard-progress">{stepLabels.map((label, index) => <button key={label} className={index === step ? "current" : index < step ? "complete" : ""} onClick={() => goTo(index)} disabled={index > step}><span>{index < step ? <Check size={12} /> : `0${index + 1}`}</span><small>{label}</small></button>)}</div><div className="wizard-step-count">Step {step + 1} of 6</div><section className="wizard-form">{step === 0 ? <BasicInformation draft={draft} update={update} /> : null}{step === 1 ? <PlatformsAudience draft={draft} update={update} /> : null}{step === 2 ? <CampaignBrief draft={draft} update={update} /> : null}{step === 3 ? <Deliverables draft={draft} update={update} /> : null}{step === 4 ? <BudgetTimeline draft={draft} update={update} /> : null}{step === 5 ? <Review draft={draft} onEdit={goTo} /> : null}{error ? <p className="wizard-error">{error}</p> : null}{published ? <p className="wizard-success"><Check size={15} />Campaign published. Returning to campaigns…</p> : null}</section><div className="wizard-actions"><button className="wizard-back" disabled={step === 0 || saving} onClick={() => setStep(step - 1)}><ArrowLeft size={15} /> Back</button>{step < 5 ? <button className="wizard-continue" onClick={next} disabled={saving}>Continue <ArrowRight size={15} /></button> : <button className="wizard-continue" onClick={() => finish("Active")} disabled={saving}>{saving ? "Publishing…" : "Publish Campaign"}<ArrowRight size={15} /></button>}</div></div></div>;
 }
 
