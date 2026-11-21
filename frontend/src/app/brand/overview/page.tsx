@@ -4,45 +4,37 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ArrowUpRight, BarChart3, CalendarDays, Check, FileCheck2, Megaphone, Plus, Send, Users } from "lucide-react";
 import type { CampaignRow } from "@/components/brand/campaigns/campaignStore";
-import type { Campaign, CampaignInvitation, CampaignParticipation, ContentReview, ContentSubmission, CreatorProfile } from "@/types/shared";
-import { getBrandCampaignRows, getContentReviews, getCreatorProfiles, getInvitationRecords, getParticipations, getSharedCampaignById, getSubmissions } from "@/lib/shared/services";
+import type { Campaign, CampaignInvitation, ContentReview, ContentSubmission, CreatorProfile } from "@/types/shared";
+import { getBrandCampaignRows, getBrandDirectoryCreatorCount, getContentReviews, getCreatorProfiles, getInvitationRecords, getSharedCampaignById, getSubmissions } from "@/lib/shared/services";
 
 type Activity = { id: string; text: string; detail: string; timestamp: string; tone: string };
 type DashboardData = {
   campaigns: CampaignRow[];
   creators: CreatorProfile[];
+  creatorCount: number;
   invitations: CampaignInvitation[];
-  participations: CampaignParticipation[];
   submissions: ContentSubmission[];
   reviews: ContentReview[];
   campaignRecords: Campaign[];
-  campaignRecordByRowId: Map<number, Campaign>;
   now: Date;
 };
 
 function loadDashboardData(): DashboardData {
   const campaigns = getBrandCampaignRows();
-  const campaignRecordByRowId = new Map<number, Campaign>();
-  for (const campaign of campaigns) {
-    const record = getSharedCampaignById(`brand-${campaign.id}`);
-    if (record) campaignRecordByRowId.set(campaign.id, record);
-  }
-  const campaignRecords = [...campaignRecordByRowId.values()];
+  const campaignRecords = campaigns.map((campaign) => getSharedCampaignById(`brand-${campaign.id}`)).filter((campaign): campaign is Campaign => Boolean(campaign));
   const campaignIds = new Set(campaignRecords.map((campaign) => campaign.id));
   const invitations = getInvitationRecords().filter((invitation) => campaignIds.has(invitation.campaignId));
-  const participations = getParticipations().filter((participation) => campaignIds.has(participation.campaignId));
   const submissions = getSubmissions().filter((submission) => campaignIds.has(submission.campaignId));
   const submissionIds = new Set(submissions.map((submission) => submission.id));
 
   return {
     campaigns,
     creators: getCreatorProfiles(),
+    creatorCount: getBrandDirectoryCreatorCount(),
     invitations,
-    participations,
     submissions,
     reviews: getContentReviews().filter((review) => submissionIds.has(review.submissionId)),
     campaignRecords,
-    campaignRecordByRowId,
     now: new Date(),
   };
 }
@@ -133,7 +125,7 @@ export default function BrandOverviewPage() {
         <Metric icon={<Megaphone />} label="Active Campaigns" value={activeCampaigns.length} note="Published campaigns" />
         <Metric icon={<CalendarDays />} label="Draft Campaigns" value={draftCount} note="Not yet published" />
         <Metric icon={<Check />} label="Completed Campaigns" value={completedCount} note="Completed records" />
-        <Metric icon={<Users />} label="Creator Profiles" value={data.creators.length} note="Available creator profiles" />
+        <Metric icon={<Users />} label="Creator Profiles" value={data.creatorCount} note="Available creator profiles" />
         <Metric icon={<Send />} label="Pending Invitations" value={pendingInvitations.length} note="Awaiting creator response" />
         <Metric icon={<FileCheck2 />} label="Pending Reviews" value={pendingReviewIds.size} note="Submitted or under review" highlight />
       </section>
@@ -146,7 +138,7 @@ export default function BrandOverviewPage() {
       <div className="brand-two-col">
         <section className="brand-panel">
           <PanelHead title="Active Campaigns" action="View All Campaigns" href="/brand/campaigns" />
-          {activeCampaigns.length ? <div className="brand-table"><div className="brand-table-head"><span>CAMPAIGN</span><span>PLATFORM</span><span>CREATORS</span><span>BUDGET</span><span>STATUS</span></div>{activeCampaigns.slice(0, 5).map((campaign) => { const canonical = data.campaignRecordByRowId.get(campaign.id); const creatorCount = canonical ? new Set(data.participations.filter((participation) => participation.campaignId === canonical.id).map((participation) => participation.creatorId)).size : 0; return <div className="brand-table-row" key={campaign.id}><span><b>{campaign.name}</b><small>Ends {dateLabel(campaign.end)}</small></span><span>{campaign.platforms.join(" · ") || "—"}</span><span>{creatorCount}</span><span>{campaign.budget}</span><span><em className={`brand-status ${campaign.status.toLowerCase()}`}>{campaign.status}</em></span></div>; })}</div> : <EmptyState message="There are no active campaigns in this workspace." />}
+          {activeCampaigns.length ? <div className="brand-table"><div className="brand-table-head"><span>CAMPAIGN</span><span>PLATFORM</span><span>CREATORS</span><span>BUDGET</span><span>STATUS</span></div>{activeCampaigns.slice(0, 5).map((campaign) => <div className="brand-table-row" key={campaign.id}><span><b>{campaign.name}</b><small>Ends {dateLabel(campaign.end)}</small></span><span>{campaign.platforms.join(" · ") || "—"}</span><span>{campaign.creators}</span><span>{campaign.budget}</span><span><em className={`brand-status ${campaign.status.toLowerCase()}`}>{campaign.status}</em></span></div>)}</div> : <EmptyState message="There are no active campaigns in this workspace." />}
         </section>
 
         <section className="brand-panel">

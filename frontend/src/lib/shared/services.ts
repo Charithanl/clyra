@@ -1,7 +1,7 @@
 import { type CampaignRow } from "@/components/brand/campaigns/campaignStore";
 import { getDemoBrandCreators as getLegacyCreators } from "./mock-data";
 import { campaignRepository, creatorRepository } from "./repositories";
-import type { AuditResult, Campaign, CampaignInvitation, CampaignParticipation, ContentReview, ContentSubmission, CreatorProfile, Notification, SocialAccount, SubmissionVersion } from "@/types/shared";
+import type { AuditResult, Campaign, CampaignApplication, CampaignInvitation, CampaignParticipation, ContentReview, ContentSubmission, CreatorProfile, Notification, SocialAccount, SubmissionVersion } from "@/types/shared";
 import type { CreatorCampaignView } from "@/lib/creator/types";
 import { DEMO_CREATOR_IDENTITY } from "./identity";
 import { auditRepository, applicationRepository, invitationRepository, notificationRepository, participationRepository, reviewRepository, submissionRepository, versionRepository } from "./domain-repositories";
@@ -22,10 +22,16 @@ export function cancelCampaign(id: string) { return campaignRepository.cancel(to
 export function archiveCampaign(id: string) { return campaignRepository.archive(toCanonicalCampaignId(id) ?? id); }
 export const getApplications = () => applicationRepository.list();
 export const getInvitations = () => invitationRepository.list();
-export const getParticipations = () => participationRepository.list();
-export const getParticipationRecordsForCreator = (creatorId: string) => { reconcileAcceptedInvitationParticipations(); return participationRepository.listByCreator(creatorId); };
+export const getParticipations = () => { reconcileAcceptedParticipations(); return participationRepository.list(); };
+export const getParticipationRecordsForCreator = (creatorId: string) => { reconcileAcceptedParticipations(); return participationRepository.listByCreator(creatorId); };
 export const getParticipationRecord = (campaignId: string, creatorId: string) => participationRepository.findByCampaignAndCreator(campaignId, creatorId);
 export const createParticipationRecord = (record: CampaignParticipation) => participationRepository.create(record);
+export function createParticipationForAcceptedApplication(application: CampaignApplication) {
+  if (application.status !== "ACCEPTED") throw new Error("Only accepted applications can create participation.");
+  const existing = participationRepository.findByCampaignAndCreator(application.campaignId, application.creatorId);
+  if (existing) return existing;
+  return participationRepository.create({ id: `participation-${application.id}`, campaignId: application.campaignId, creatorId: application.creatorId, sourceType: "APPLICATION", sourceId: application.id, status: "UPCOMING", joinedAt: application.reviewedAt ?? application.submittedAt ?? new Date().toISOString() });
+}
 export function createParticipationForAcceptedInvitation(invitation: CampaignInvitation) {
   if (invitation.status !== "ACCEPTED") throw new Error("Only accepted invitations can create participation.");
   const existing = participationRepository.findByCampaignAndCreator(invitation.campaignId, invitation.creatorId);
@@ -34,6 +40,10 @@ export function createParticipationForAcceptedInvitation(invitation: CampaignInv
   return participationRepository.create(record);
 }
 export function reconcileAcceptedInvitationParticipations() { invitationRepository.list().filter((invitation) => invitation.status === "ACCEPTED").forEach((invitation) => createParticipationForAcceptedInvitation(invitation)); }
+export function reconcileAcceptedParticipations() {
+  applicationRepository.list().filter((application) => application.status === "ACCEPTED").forEach(createParticipationForAcceptedApplication);
+  reconcileAcceptedInvitationParticipations();
+}
 export const getSubmissions = () => submissionRepository.list();
 export const getSubmissionRecord = (id: string) => submissionRepository.getById(id);
 export const getSubmissionRecordsForCreator = (creatorId: string) => submissionRepository.list().filter((item) => item.creatorId === creatorId);
@@ -82,7 +92,7 @@ export const getInvitationRecordsForCreator = (creatorId: string) => invitationR
 export const createInvitationRecord = (record: CampaignInvitation) => invitationRepository.create(record);
 export const updateInvitationRecord = (id: string, changes: Partial<CampaignInvitation>) => invitationRepository.update(id, changes);
 export const hasActiveInvitationRecord = (campaignId: string, creatorId: string) => invitationRepository.hasActive(campaignId, creatorId);
-export function getBrandCampaignRows() { return campaignRepository.getAll().filter((campaign) => campaign.organizationId === "org-studio-north").map(toLegacyCampaign); }
+export function getBrandCampaignRows() { reconcileAcceptedParticipations(); return campaignRepository.getAll().filter((campaign) => campaign.organizationId === "org-studio-north").map(campaignRowProjection); }
 export function getCreatorProfile(id = DEMO_CREATOR_IDENTITY.creatorId) { return creatorRepository.getById(id); }
 export function getCreatorProfiles() { return creatorRepository.list(); }
 export function updateCreatorProfile(profile: CreatorProfile) { return creatorRepository.update(profile); }
@@ -90,9 +100,21 @@ export function getCreatorSocialAccounts(creatorId = DEMO_CREATOR_IDENTITY.creat
 export function addCreatorSocialAccount(account: SocialAccount, creatorId = DEMO_CREATOR_IDENTITY.creatorId) { return creatorRepository.addSocialAccount(creatorId, account); }
 export function updateCreatorSocialAccount(accountId: string, changes: Partial<Omit<SocialAccount, "id" | "creatorId">>, creatorId = DEMO_CREATOR_IDENTITY.creatorId) { return creatorRepository.updateSocialAccount(creatorId, accountId, changes); }
 export function removeCreatorSocialAccount(accountId: string, creatorId = DEMO_CREATOR_IDENTITY.creatorId) { return creatorRepository.removeSocialAccount(creatorId, accountId); }
-export function getBrandDirectoryCreators() { const profile = creatorRepository.getById(DEMO_CREATOR_IDENTITY.creatorId); return getLegacyCreators().map((creator) => creator.id === DEMO_CREATOR_IDENTITY.directoryId && profile ? { ...creator, name: profile.displayName, bio: profile.bio, location: profile.location, niche: profile.categories[0] ?? creator.niche, followers: profile.socialAccounts[0]?.followerCount ?? creator.followers, engagement: profile.socialAccounts[0]?.engagementRate ?? creator.engagement, platforms: profile.socialAccounts.map((account) => account.platform === "INSTAGRAM" ? "Instagram" : "YouTube") } : creator); }
+export function getBrandDirectoryCreators() {
+  const profile = creatorRepository.getById(DEMO_CREATOR_IDENTITY.creatorId);
+  const rows = getLegacyCreators().map((creator) => creator.id === DEMO_CREATOR_IDENTITY.directoryId && profile ? { ...creator, name: profile.displayName, bio: profile.bio, location: profile.location, niche: profile.categories[0] ?? creator.niche, followers: profile.socialAccounts[0]?.followerCount ?? creator.followers, engagement: profile.socialAccounts[0]?.engagementRate ?? creator.engagement, platforms: profile.socialAccounts.map((account) => account.platform === "INSTAGRAM" ? "Instagram" : "YouTube") } : creator);
+  const unique = new Map(rows.map((creator) => [creator.id === DEMO_CREATOR_IDENTITY.directoryId ? DEMO_CREATOR_IDENTITY.creatorId : creator.id, creator]));
+  return [...unique.values()];
+}
+export function getBrandDirectoryCreatorCount() { return getBrandDirectoryCreators().length; }
 function rowToSharedCampaign(row: CampaignRow): Campaign { const id = toCanonicalCampaignId(row.id) ?? canonicalIdForNewCampaign(row.id); const existing = campaignRepository.getById(id); const now = new Date().toISOString(); return { id, organizationId: "org-studio-north", clientBrandId: row.brand, organizationName: "Studio North", title: row.name, description: row.description, objectives: existing?.objectives ?? [row.description], industry: existing?.industry ?? "Creator marketing", categories: existing?.categories ?? ["Lifestyle"], platforms: row.platforms.map((item) => item === "Instagram" ? "INSTAGRAM" : "YOUTUBE"), targetAudience: existing?.targetAudience ?? "Campaign-defined audience", budget: { min: Number(row.budget.replace(/\D/g, "")) || undefined, currency: existing?.budget.currency ?? "INR" }, compensationType: existing?.compensationType ?? "Paid", startDate: existing?.startDate ?? now, endDate: existing?.endDate ?? now, applicationDeadline: existing?.applicationDeadline ?? now, status: row.status === "Active" ? "PUBLISHED" : row.status === "Draft" ? "DRAFT" : row.status === "Paused" ? "PAUSED" : row.status === "Completed" ? "COMPLETED" : row.status === "Cancelled" ? "CANCELLED" : "ARCHIVED", requirements: existing?.requirements ?? [], hashtags: existing?.hashtags ?? [], brandMentions: existing?.brandMentions ?? [], keywords: existing?.keywords ?? [], disclosureRequirements: existing?.disclosureRequirements ?? [], deliverables: existing?.deliverables ?? [], createdAt: existing?.createdAt ?? now, updatedAt: now, publishedAt: row.status === "Active" ? existing?.publishedAt ?? now : existing?.publishedAt }; }
 export function saveBrandCampaign(campaign: CampaignRow) { return campaignRepository.create(rowToSharedCampaign(campaign)); }
 export function updateBrandCampaign(id: number, changes: Partial<CampaignRow>) { const canonicalId = toCanonicalCampaignId(id); if (!canonicalId) return undefined; const current = campaignRepository.getById(canonicalId); if (!current) return undefined; return campaignRepository.update(canonicalId, rowToSharedCampaign({ ...toLegacyCampaign(current), ...changes, id })); }
 export function getBrandCampaigns() { return getBrandCampaignRows(); }
-export function toLegacyCampaign(campaign: Campaign): LegacyCampaign { return { id: toLegacyCampaignId(campaign.id) ?? Date.now(), name: campaign.title, description: campaign.description, brand: campaign.clientBrandId ?? campaign.organizationName, platforms: campaign.platforms.map((item) => item === "INSTAGRAM" ? "Instagram" : "YouTube"), creators: 0, accepted: 0, budget: campaign.budget.min ? `₹${campaign.budget.min}` : "Budget TBD", start: campaign.startDate.slice(0, 10), end: campaign.endDate.slice(0, 10), status: campaign.status === "PUBLISHED" ? "Active" : campaign.status === "DRAFT" ? "Draft" : campaign.status === "PAUSED" ? "Paused" : campaign.status === "COMPLETED" ? "Completed" : campaign.status === "CANCELLED" ? "Cancelled" : "Archived" }; }
+function campaignRowProjection(campaign: Campaign): LegacyCampaign {
+  const participations = participationRepository.listByCampaign(campaign.id);
+  const creators = new Set(participations.map((participation) => participation.creatorId));
+  const accepted = new Set(participations.filter((participation) => participation.status !== "CANCELLED").map((participation) => participation.creatorId));
+  return { id: toLegacyCampaignId(campaign.id) ?? Date.now(), name: campaign.title, description: campaign.description, brand: campaign.clientBrandId ?? campaign.organizationName, platforms: campaign.platforms.map((item) => item === "INSTAGRAM" ? "Instagram" : "YouTube"), creators: creators.size, accepted: accepted.size, budget: campaign.budget.min ? `₹${campaign.budget.min}` : "Budget TBD", start: campaign.startDate.slice(0, 10), end: campaign.endDate.slice(0, 10), status: campaign.status === "PUBLISHED" ? "Active" : campaign.status === "DRAFT" ? "Draft" : campaign.status === "PAUSED" ? "Paused" : campaign.status === "COMPLETED" ? "Completed" : campaign.status === "CANCELLED" ? "Cancelled" : "Archived" };
+}
+export function toLegacyCampaign(campaign: Campaign): LegacyCampaign { reconcileAcceptedParticipations(); return campaignRowProjection(campaign); }

@@ -56,7 +56,7 @@ export default function CampaignDetailsPage() {
         </div>
         <div className="brand-metric-grid" style={{ marginTop: 20 }}>
           <div className="brand-metric"><div>Platforms</div><strong>{campaign.platforms.join(" · ")}</strong></div>
-          <div className="brand-metric"><div>Creators</div><strong>{campaign.creators}</strong></div>
+          <div className="brand-metric"><div>Accepted / participating</div><strong>{campaign.accepted} / {campaign.creators}</strong></div>
           <div className="brand-metric"><div>Budget</div><strong>{campaign.budget}</strong></div>
           <div className="brand-metric"><div>Timeline</div><strong>{campaign.start}</strong><small>to {campaign.end}</small></div>
         </div>
