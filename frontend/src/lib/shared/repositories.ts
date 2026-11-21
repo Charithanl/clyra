@@ -3,12 +3,48 @@ import { syncLegacyCreatorForm } from "./profile-mappers";
 import { validateSocialAccounts } from "./social-account-validation";
 import { DEMO_CREATOR_IDENTITY } from "./identity";
 import type { Campaign, CreatorProfile, SocialAccount, SocialPlatform } from "@/types/shared";
-export interface CampaignRepository { getAll(): Campaign[]; getPublished(): Campaign[]; getById(id: string): Campaign | undefined; create(campaign: Campaign): Campaign; update(id: string, changes: Partial<Campaign>): Campaign | undefined; publish(id: string): Campaign | undefined; pause(id: string): Campaign | undefined; resume(id: string): Campaign | undefined; complete(id: string): Campaign | undefined; cancel(id: string): Campaign | undefined; }
+export interface CampaignRepository { getAll(): Campaign[]; getPublished(): Campaign[]; getById(id: string): Campaign | undefined; create(campaign: Campaign): Campaign; update(id: string, changes: Partial<Campaign>): Campaign | undefined; publish(id: string): Campaign | undefined; pause(id: string): Campaign | undefined; resume(id: string): Campaign | undefined; complete(id: string): Campaign | undefined; cancel(id: string): Campaign | undefined; archive(id: string): Campaign | undefined; }
 export interface CreatorRepository { getById(id: string): CreatorProfile | undefined; list(): CreatorProfile[]; update(profile: CreatorProfile): CreatorProfile; getSocialAccounts(creatorId: string): SocialAccount[] | undefined; addSocialAccount(creatorId: string, account: SocialAccount): SocialAccount; updateSocialAccount(creatorId: string, accountId: string, changes: Partial<Omit<SocialAccount, "id" | "creatorId">>): SocialAccount | undefined; removeSocialAccount(creatorId: string, accountId: string): SocialAccount | undefined; }
 const legacyDate = (value: string) => { const date = new Date(value); return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString(); };
 let campaigns = getDemoSharedCampaigns();
-const transition = (id: string, status: Campaign["status"]) => campaignRepository.update(id, { status, updatedAt: new Date().toISOString(), ...(status === "PUBLISHED" ? { publishedAt: new Date().toISOString() } : {}) });
-export const campaignRepository: CampaignRepository = { getAll: () => campaigns.map((campaign) => ({ ...campaign, platforms: [...campaign.platforms], deliverables: campaign.deliverables.map((item) => ({ ...item, requirements: [...item.requirements] })) })), getPublished: () => campaignRepository.getAll().filter((campaign) => campaign.status === "PUBLISHED" && new Date(campaign.applicationDeadline) >= new Date()), getById: (id) => campaignRepository.getAll().find((campaign) => campaign.id === id), create: (campaign) => { campaigns = [campaign, ...campaigns.filter((item) => item.id !== campaign.id)]; return campaign; }, update: (id, changes) => { const current = campaigns.find((campaign) => campaign.id === id); if (!current) return undefined; const next = { ...current, ...changes, updatedAt: new Date().toISOString() }; campaigns = campaigns.map((campaign) => campaign.id === id ? next : campaign); return next; }, publish: (id) => transition(id, "PUBLISHED"), pause: (id) => transition(id, "PAUSED"), resume: (id) => transition(id, "PUBLISHED"), complete: (id) => transition(id, "COMPLETED"), cancel: (id) => transition(id, "CANCELLED") };
+const campaignTransitions: Record<Campaign["status"], readonly Campaign["status"][]> = {
+  DRAFT: ["PUBLISHED", "CANCELLED", "ARCHIVED"],
+  PUBLISHED: ["PAUSED", "COMPLETED", "CANCELLED", "ARCHIVED"],
+  PAUSED: ["PUBLISHED", "COMPLETED", "CANCELLED", "ARCHIVED"],
+  COMPLETED: ["ARCHIVED"],
+  CANCELLED: ["ARCHIVED"],
+  ARCHIVED: [],
+};
+const transition = (id: string, status: Campaign["status"]) => {
+  const current = campaigns.find((campaign) => campaign.id === id);
+  if (!current) return undefined;
+  if (current.status === status || !campaignTransitions[current.status].includes(status)) {
+    throw new Error(`Cannot transition campaign from ${current.status} to ${status}.`);
+  }
+  return campaignRepository.update(id, { status, updatedAt: new Date().toISOString(), ...(status === "PUBLISHED" ? { publishedAt: new Date().toISOString() } : {}) });
+};
+export const campaignRepository: CampaignRepository = {
+  getAll: () => campaigns.map((campaign) => ({ ...campaign, platforms: [...campaign.platforms], deliverables: campaign.deliverables.map((item) => ({ ...item, requirements: [...item.requirements] })) })),
+  getPublished: () => campaignRepository.getAll().filter((campaign) => campaign.status === "PUBLISHED" && new Date(campaign.applicationDeadline) >= new Date()),
+  getById: (id) => campaignRepository.getAll().find((campaign) => campaign.id === id),
+  create: (campaign) => { campaigns = [campaign, ...campaigns.filter((item) => item.id !== campaign.id)]; return campaign; },
+  update: (id, changes) => {
+    const current = campaigns.find((campaign) => campaign.id === id);
+    if (!current) return undefined;
+    if (changes.status && changes.status !== current.status && !campaignTransitions[current.status].includes(changes.status)) {
+      throw new Error(`Cannot transition campaign from ${current.status} to ${changes.status}.`);
+    }
+    const next = { ...current, ...changes, updatedAt: new Date().toISOString() };
+    campaigns = campaigns.map((campaign) => campaign.id === id ? next : campaign);
+    return next;
+  },
+  publish: (id) => transition(id, "PUBLISHED"),
+  pause: (id) => transition(id, "PAUSED"),
+  resume: (id) => transition(id, "PUBLISHED"),
+  complete: (id) => transition(id, "COMPLETED"),
+  cancel: (id) => transition(id, "CANCELLED"),
+  archive: (id) => transition(id, "ARCHIVED"),
+};
 let profile = getDemoCreatorProfile();
 export const creatorRepository: CreatorRepository = {
   getById: (id) => id === profile.id || id === DEMO_CREATOR_IDENTITY.directoryId ? profile : undefined,
